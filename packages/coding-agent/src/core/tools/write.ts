@@ -1,7 +1,7 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Container, Text } from "@earendil-works/pi-tui";
-import { mkdir as fsMkdir, writeFile as fsWriteFile } from "fs/promises";
-import { dirname } from "path";
+import { mkdir as fsMkdir, readFile as fsReadFile, stat as fsStat, writeFile as fsWriteFile } from "fs/promises";
+import { dirname, join } from "path";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/interactive/theme/theme.ts";
@@ -33,6 +33,109 @@ const defaultWriteOperations: WriteOperations = {
 	writeFile: (path, content) => fsWriteFile(path, content, "utf-8"),
 	mkdir: (dir) => fsMkdir(dir, { recursive: true }).then(() => {}),
 };
+
+/**
+ * Verify the write actually landed on the local filesystem.
+ * Uses fs.stat for the fast path (microseconds); only reads content
+ * when the size check fails and we need diagnostic details.
+ *
+ * Only called when using the default local WriteOperations.
+ * Custom operations (e.g. SSH) are responsible for their own verification.
+ */
+async function verifyWrite(absolutePath: string, expected: string): Promise<void> {
+	const expectedBytes = Buffer.byteLength(expected, "utf8");
+	let stat: Awaited<ReturnType<typeof fsStat>>;
+	try {
+		stat = await fsStat(absolutePath);
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		const hint = buildWriteFailureHint(absolutePath, code);
+		throw new Error(
+			`Write reported success (${expectedBytes} bytes), but stat failed.
+  path: ${absolutePath}
+  error: ${code ?? String(error)}
+${hint}`,
+			{ cause: error },
+		);
+	}
+
+	if (stat.size !== expectedBytes) {
+		// Size mismatch — read back actual content for diagnostics.
+		let actual: string;
+		try {
+			actual = await fsReadFile(absolutePath, "utf-8");
+		} catch {
+			actual = `(read failed after stat succeeded: ${stat.size} bytes on disk vs ${expectedBytes} expected)`;
+		}
+		const hint = buildWriteFailureHint(absolutePath);
+		throw new Error(
+			`Write reported success (${expectedBytes} bytes), but file size on disk is ${stat.size} bytes.
+  path: ${absolutePath}
+  actual content: ${actual.slice(0, 200)}${actual.length > 200 ? "..." : ""}
+${hint}`,
+		);
+	}
+}
+
+/**
+ * Build diagnostic hints for a failed write verification.
+ * On Windows, include the VirtualStore path when the target is in a
+ * protected directory that triggers filesystem redirection.
+ */
+function buildWriteFailureHint(absolutePath: string, errCode?: string): string {
+	if (process.platform !== "win32") {
+		return errCode === "ENOENT"
+			? "The file was not found after a successful write. This may indicate a filesystem issue."
+			: "";
+	}
+
+	const virtualStorePath = getVirtualStorePath(absolutePath);
+	if (!virtualStorePath) {
+		return errCode === "ENOENT"
+			? "On Windows, this can be caused by antivirus software deleting or quarantining the file, or by cloud-sync conflicts (OneDrive, Dropbox)."
+			: "On Windows, this can be caused by antivirus interference or cloud-sync conflicts (OneDrive, Dropbox).";
+	}
+
+	return `On Windows, ${absolutePath} is in a protected directory that triggers
+filesystem redirection (VirtualStore). The file was likely written to:
+  ${virtualStorePath}
+
+To write to protected directories, run pi as Administrator.
+Otherwise, write to a non-protected location (e.g. %USERPROFILE%).`;
+}
+
+/**
+ * Return the VirtualStore path for a given absolute path on Windows.
+ * Returns undefined if the path is not in a protected directory.
+ *
+ * Protected directories that trigger VirtualStore redirection:
+ * - %ProgramFiles% (C:\Program Files, C:\Program Files (x86))
+ * - %SystemRoot% (C:\Windows)
+ */
+function getVirtualStorePath(absolutePath: string): string | undefined {
+	const lower = absolutePath.toLowerCase();
+	const programFiles = (process.env.ProgramFiles ?? "C:\\Program Files").toLowerCase();
+	const programFilesX86 = (process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)").toLowerCase();
+	const systemRoot = (process.env.SystemRoot ?? "C:\\Windows").toLowerCase();
+
+	const isProtected =
+		lower === programFiles ||
+		lower.startsWith(`${programFiles}\\`) ||
+		lower === programFilesX86 ||
+		lower.startsWith(`${programFilesX86}\\`) ||
+		lower === systemRoot ||
+		lower.startsWith(`${systemRoot}\\`);
+	if (!isProtected) return undefined;
+
+	// Strip only the drive root (e.g. "C:\") so the protected directory name
+	// is included in the VirtualStore path. Windows redirects:
+	//   C:\Program Files\MyApp\foo → %LOCALAPPDATA%\VirtualStore\Program Files\MyApp\foo
+	const driveRootEnd = absolutePath.indexOf(":") + 2; // "C:\"
+	const relativePath = absolutePath.slice(driveRootEnd).replace(/^[\\/]+/, "");
+	const localAppData =
+		process.env.LOCALAPPDATA ?? join(process.env.USERPROFILE ?? "C:\\Users\\Default", "AppData", "Local");
+	return join(localAppData, "VirtualStore", relativePath);
+}
 
 export interface WriteToolOptions {
 	/** Custom operations for file writing. Default: local filesystem */
@@ -200,6 +303,7 @@ export function createWriteToolDefinition(
 		) {
 			const absolutePath = resolveToCwd(path, cwd);
 			const dir = dirname(absolutePath);
+			const contentBytes = Buffer.byteLength(content, "utf8");
 			return withFileMutationQueue(absolutePath, async () => {
 				// Do not reject from an abort event listener here: that would release the
 				// mutation queue while an in-flight filesystem operation may still finish.
@@ -218,8 +322,15 @@ export function createWriteToolDefinition(
 				await ops.writeFile(absolutePath, content);
 				throwIfAborted();
 
+				// Verify the write actually landed on the local filesystem.
+				// Only valid for default local operations; custom ops (e.g. SSH)
+				// are responsible for their own verification.
+				if (ops === defaultWriteOperations) {
+					await verifyWrite(absolutePath, content);
+				}
+
 				return {
-					content: [{ type: "text", text: `Successfully wrote ${content.length} bytes to ${path}` }],
+					content: [{ type: "text", text: `Successfully wrote ${contentBytes} bytes to ${absolutePath}` }],
 					details: undefined,
 				};
 			});

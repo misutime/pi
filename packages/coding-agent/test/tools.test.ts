@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeBashWithOperations } from "../src/core/bash-executor.ts";
 import { type BashOperations, createBashTool, createLocalBashOperations } from "../src/core/tools/bash.ts";
 import { computeEditsDiff } from "../src/core/tools/edit-diff.ts";
+import type { WriteOperations } from "../src/index.ts";
 import {
 	createEditTool,
 	createFindTool,
@@ -256,6 +257,67 @@ describe("Coding Agent Tools", () => {
 			const result = await writeTool.execute("test-call-4", { path: testFile, content });
 
 			expect(getTextOutput(result)).toContain("Successfully wrote");
+		});
+
+		it("should report correct UTF-8 byte count for non-ASCII content", async () => {
+			const testFile = join(testDir, "write-utf8.txt");
+			const content = "你好世界";
+
+			const result = await writeTool.execute("test-call-utf8", { path: testFile, content });
+
+			// "你好世界" is 4 characters (4 UTF-16 code units) but 12 UTF-8 bytes
+			const byteCount = Buffer.byteLength(content, "utf8");
+			expect(byteCount).toBe(12);
+			expect(content.length).toBe(4);
+			expect(getTextOutput(result)).toContain(`Successfully wrote ${byteCount} bytes`);
+		});
+
+		it("should report correct UTF-8 byte count for emoji content", async () => {
+			const testFile = join(testDir, "write-emoji.txt");
+			const content = "🚀✨";
+
+			const result = await writeTool.execute("test-call-emoji", { path: testFile, content });
+
+			// "🚀✨" is 2 characters but 7 UTF-8 bytes (🚀=4, ✨=3)
+			const byteCount = Buffer.byteLength(content, "utf8");
+			expect(byteCount).toBe(7);
+			expect(getTextOutput(result)).toContain(`Successfully wrote ${byteCount} bytes`);
+		});
+
+		it("should verify the write after success (default ops)", async () => {
+			const testFile = join(testDir, "write-verify.txt");
+			const content = "verify me";
+
+			const result = await writeTool.execute("test-call-verify", { path: testFile, content });
+
+			expect(getTextOutput(result)).toContain("Successfully wrote");
+			// File should actually exist on disk
+			expect(existsSync(testFile)).toBe(true);
+			expect(readFileSync(testFile, "utf-8")).toBe(content);
+		});
+
+		it("should skip write verification for custom operations", async () => {
+			const testFile = join(testDir, "write-custom-ops.txt");
+			const content = "written by custom ops";
+
+			let writtenPath = "";
+			let writtenContent = "";
+			const customOps: WriteOperations = {
+				writeFile: async (p, c) => {
+					writtenPath = p;
+					writtenContent = c;
+				},
+				mkdir: async () => {},
+			};
+
+			const customWriteTool = createWriteTool(process.cwd(), { operations: customOps });
+			const result = await customWriteTool.execute("test-call-custom", { path: testFile, content });
+
+			expect(getTextOutput(result)).toContain("Successfully wrote");
+			expect(writtenPath).toBe(testFile);
+			expect(writtenContent).toBe(content);
+			// Local file should NOT exist (write went to custom ops, not disk)
+			expect(existsSync(testFile)).toBe(false);
 		});
 	});
 
