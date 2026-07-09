@@ -82,7 +82,7 @@ export interface CreateAgentSessionOptions {
 }
 ```
 
-过滤逻辑 (sdk.ts L247-260)：
+激活逻辑 (sdk.ts L247-260) —— 注意这里的 `tools`/`excludeTools` 决定初始激活列表，属于激活层，不是硬过滤：
 
 ```ts
 const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
@@ -97,9 +97,18 @@ const initialActiveToolNames: string[] = (
 ).filter((name) => !excludedToolNameSet?.has(name));  // 再减去 denylist
 ```
 
-### 3. AgentSessionConfig (硬过滤)
+### 3. AgentSessionConfig (硬过滤层)
 
 文件：`packages/coding-agent/src/core/agent-session.ts`
+
+过滤层只有两个配置，都是硬门禁：
+
+- `allowedToolNames?: string[]` — 硬 allowlist，只把列表中的工具放入 registry
+- `excludedToolNames?: string[]` — 硬 denylist，列表中的工具直接排除
+
+这两个字段仅通过 SDK (`AgentSessionConfig`) 设置，CLI 无法触及。被过滤的工具不进 registry，`setActiveTools()` 无法激活。
+
+注意区分 CLI 的 `--exclude-tools`（激活层，运行时可用 `setActiveTools` 重新激活）和这里的 `excludedToolNames`（过滤层，彻底不可用）。
 
 ```ts
 export interface AgentSessionConfig {
@@ -111,7 +120,7 @@ export interface AgentSessionConfig {
 }
 ```
 
-`allowedToolNames` 和 `excludedToolNames` 是硬过滤：不在 allowlist 中的工具不会出现在 registry 中，`setActiveTools()` 也无法添加。过滤逻辑在 `_refreshToolRegistry()` 方法中实现。
+过滤逻辑在 `_refreshToolRegistry()` 的 `isAllowedTool()` 函数中实现。
 
 ---
 
@@ -294,8 +303,10 @@ export interface ActiveToolsChangeEntry extends SessionTreeEntryBase {
 
 ## 配置优先级
 
+激活层优先级（决定初始激活哪些工具）：
+
 ```
 CLI flags > Preset 配置 > 默认值 (["read","bash","edit","write"])
 ```
 
-`allowedToolNames` / `excludedToolNames` 在 `AgentSessionConfig` 中是硬过滤，运行时 `setActiveTools()` 无法绕过。所有工具名最终通过 `_refreshToolRegistry()` 的 `isAllowedTool()` 函数过滤后才进入 registry。
+过滤层（`allowedToolNames` / `excludedToolNames`）是独立硬门禁，在所有激活层逻辑之前生效：工具先进 `_refreshToolRegistry()` 的 `isAllowedTool()` 检查，被过滤掉的工具不进 registry，后续任何激活操作都无法触及。

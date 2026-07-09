@@ -38,3 +38,5 @@ todo.md
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
 collect.sh
+
+.codegraph
