@@ -32,11 +32,11 @@ export type ToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "l
 | `bash` | Yes | 执行 shell 命令 |
 | `edit` | Yes | 精确替换编辑文件 |
 | `write` | Yes | 创建/覆写文件 |
-| `grep` | No | 搜索文件内容 (只读) |
-| `find` | No | glob 模式查找文件 (只读) |
-| `ls` | No | 列出目录内容 (只读) |
+| `grep` | Yes | 搜索文件内容 (只读) |
+| `find` | Yes | glob 模式查找文件 (只读) |
+| `ls` | Yes | 列出目录内容 (只读) |
 
-`grep`、`find`、`ls` 是只读工具，默认不激活。可通过 CLI allowlist 或扩展启用。
+7 个内置工具全部默认激活。可通过 CLI allowlist 或 `--exclude-tools` 缩小范围。
 
 ---
 
@@ -85,7 +85,7 @@ export interface CreateAgentSessionOptions {
 激活逻辑 (sdk.ts L247-260) —— 注意这里的 `tools`/`excludeTools` 决定初始激活列表，属于激活层，不是硬过滤：
 
 ```ts
-const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
+const defaultActiveToolNames: ToolName[] = [...allToolNames];
 const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
 
 const initialActiveToolNames: string[] = (
@@ -93,7 +93,7 @@ const initialActiveToolNames: string[] = (
         ? [...options.tools]           // allowlist 指定了 -> 用它
         : options.noTools
             ? []                        // --no-tools -> 空
-            : defaultActiveToolNames    // 默认 4 个
+            : defaultActiveToolNames    // 全部 7 个内置工具
 ).filter((name) => !excludedToolNameSet?.has(name));  // 再减去 denylist
 ```
 
@@ -306,7 +306,7 @@ export interface ActiveToolsChangeEntry extends SessionTreeEntryBase {
 激活层优先级（决定初始激活哪些工具）：
 
 ```
-CLI flags > Preset 配置 > 默认值 (["read","bash","edit","write"])
+CLI flags > Preset 配置 > 全部 7 个内置工具
 ```
 
 过滤层（`allowedToolNames` / `excludedToolNames`）是独立硬门禁，在所有激活层逻辑之前生效：工具先进 `_refreshToolRegistry()` 的 `isAllowedTool()` 检查，被过滤掉的工具不进 registry，后续任何激活操作都无法触及。
