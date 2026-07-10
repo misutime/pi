@@ -47,7 +47,10 @@ function normalizeSelfUpdatePackageTarget(target: SelfUpdatePackageTarget): {
 	if (typeof target === "string") {
 		return { packageName: target, installSpec: target };
 	}
-	return { packageName: target.packageName, installSpec: target.installSpec ?? target.packageName };
+	return {
+		packageName: target.packageName,
+		installSpec: target.installSpec ?? target.packageName,
+	};
 }
 
 function makeSelfUpdateCommand(

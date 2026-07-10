@@ -160,3 +160,43 @@ Attribution:
 ## User Override
 
 If the user's instructions conflict with any rule in this document, ask for explicit confirmation before overriding. Only then execute their instructions.
+
+## Cross-Platform Compatibility
+
+All functional code (build scripts, test assertions, tool implementations) must work on both Windows (pwsh) and macOS/Linux (zsh). Platform-specific paths, shell syntax, and OS calls must be abstracted or guarded.
+
+### Justfile
+
+- Shell: `set shell := ["zsh", "-euc"]` (non-Windows) + `set windows-shell := ["pwsh.exe", "-NoLogo", "-Command"]` (Windows)
+- Env vars for child processes: `export VAR := "value"` (prefer over `set export := true`)
+- Recipes use `[working-directory]` instead of inline `cd` (cross-shell incompatible)
+- Default recipe lists available commands via `@just --list`
+
+### Shell Scripts
+
+- `.sh` scripts must not be called directly from Node.js code via `spawn('./script.sh')` on Windows. Use `--skip-*` flags in `local-release.mjs` or convert to Node.js equivalents.
+- `test.sh` is Unix-only; CI flow already covers tests via `just ci` (vitest).
+- `build-binaries.sh` is Unix-only; skip with `--skip-bun` on Windows.
+
+### Path Handling
+
+- Use `path.join()`, `path.resolve()` — never hardcode `\\` or `/`.
+- Repo-relative paths in configs use forward slashes (cross-platform in Node.js).
+- Output directories for local release point outside the repo (e.g., `../pi-local-release`).
+
+### Test Compatibility
+
+- File permission tests: `EACCES` (Unix) vs `EPERM` (Windows). Use regex `E(ACCES|PERM)` or `skipIf(process.platform === "win32")`.
+- `chmod` does not block reads on Windows; tests relying on unreadable files must skip on Windows.
+- Regex patterns from Windows paths must escape backslashes (e.g., `.replace(/\\/g, "\\\\")`).
+
+### Just Recipes
+
+| Recipe | Purpose |
+|--------|---------|
+| `just` | List all recipes |
+| `just build` | ts → dist |
+| `just check` | Lint + typecheck + shrinkwrap |
+| `just test [pattern]` | Run coding-agent vitest |
+| `just ci` | build + check + test |
+| `just all [OUT_DIR]` | ci + local release (default: `../pi-local-release`) |
