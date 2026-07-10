@@ -2,17 +2,18 @@
  * Subagent executor — creates child sessions and runs subagent tasks.
  */
 
-import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Model } from "@earendil-works/pi-ai/compat";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Model } from "@earendil-works/pi-ai/compat";
 import {
+  type AgentSession,
   createAgentSession,
-  createExtensionRuntime,
+  DefaultResourceLoader,
+  getAgentDir,
   type ModelRegistry,
   resolveCliModel,
-  type ResourceLoader,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import type { IAgentConfig, ToolCallSummary, UsageSummary } from "./types.ts";
+import type { IAgentConfig } from "./types.ts";
 import {
   buildSubagentSystemPrompt,
   buildSubagentUserPrompt,
@@ -31,32 +32,10 @@ export interface SubagentRunOptions {
 }
 
 // ============================================================================
-// Headless ResourceLoader
-// ============================================================================
-
-function createHeadlessResourceLoader(systemPrompt: string): ResourceLoader {
-  return {
-    getExtensions: () => ({
-      extensions: [],
-      errors: [],
-      runtime: createExtensionRuntime(),
-    }),
-    getSkills: () => ({ skills: [], diagnostics: [] }),
-    getPrompts: () => ({ prompts: [], diagnostics: [] }),
-    getThemes: () => ({ themes: [], diagnostics: [] }),
-    getAgentsFiles: () => ({ agentsFiles: [] }),
-    getSystemPrompt: () => systemPrompt,
-    getAppendSystemPrompt: () => [],
-    extendResources: () => {},
-    reload: async () => {},
-  };
-}
-
-// ============================================================================
 // Executor
 // ============================================================================
 
-export async function runSubagent(options: SubagentRunOptions) {
+export async function runSubagent(options: SubagentRunOptions): Promise<string> {
   const { agent, task, cwd, modelRegistry, signal } = options;
 
   // --- Build prompts ---
@@ -71,13 +50,7 @@ export async function runSubagent(options: SubagentRunOptions) {
     const resolved = resolveCliModel({ cliModel: agent.model, modelRegistry });
 
     if (resolved.error || !resolved.model) {
-      return {
-        status: "invalid_agent_model",
-        agent: agent.name,
-        summary: `Agent "${agent.name}" specifies model "${agent.model}" which could not be resolved.`,
-        details: resolved.error ?? `Model "${agent.model}" was not found.`,
-        messages: [],
-      };
+      return `本次 agent 执行终止，返回内容: Agent "${agent.name}" 指定的 model "${agent.model}" 无法解析 (${resolved.error ?? "未找到"})。`;
     }
 
     model = resolved.model;
@@ -86,8 +59,22 @@ export async function runSubagent(options: SubagentRunOptions) {
 
   // --- Create child session ---
   const childSessionManager = SessionManager.inMemory(cwd);
-  const headlessLoader = createHeadlessResourceLoader(systemPrompt);
-  let childSession;
+  const agentDir = getAgentDir();
+  const resourceLoader = new DefaultResourceLoader({
+    cwd,
+    agentDir,
+    noSkills: true,
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    systemPrompt,
+    appendSystemPrompt: [],
+  });
+  await resourceLoader.reload();
+  let childSession: AgentSession | undefined;
+  let aborted = false;
+  let onAbort: (() => void) | undefined;
+  let finalAssistantText = "";
 
   try {
     const result = await createAgentSession({
@@ -97,46 +84,34 @@ export async function runSubagent(options: SubagentRunOptions) {
       model,
       thinkingLevel,
       tools: agent.tools,
-      resourceLoader: headlessLoader,
+      resourceLoader,
     });
 
     childSession = result.session;
 
+    // --- Set up abort propagation ---
+
+    if (signal) {
+      onAbort = () => {
+        aborted = true;
+        childSession?.abort()?.catch(() => {});
+      };
+      if (signal.aborted) {
+        aborted = true;
+        childSession?.abort()?.catch(() => {});
+      } else {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+
     // --- Set up event collection ---
-    let finalAssistantText = "";
-    const collectedToolCalls: ToolCallSummary[] = [];
-    const collectedMessages: AgentMessage[] = [];
-    let collectedUsage: UsageSummary = {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      cost: 0,
-      turns: 0,
-    };
 
     const unsubscribe = childSession.subscribe((event) => {
       if (event.type === "message_end") {
         const msg = event.message;
-        collectedMessages.push(msg);
 
         if (msg.role === "assistant") {
-          collectedUsage.turns++;
-          const amsg = msg as AssistantMessage;
-          const u = amsg.usage;
-          if (u) {
-            collectedUsage.input += u.input || 0;
-            collectedUsage.output += u.output || 0;
-            collectedUsage.cacheRead += u.cacheRead || 0;
-            collectedUsage.cacheWrite += u.cacheWrite || 0;
-          }
-          // Access cost with a safe path (pi-ai compat may have it at usage.cost.total)
-          const costTotal = (u as any)?.cost?.total;
-          if (typeof costTotal === "number") {
-            collectedUsage.cost += costTotal;
-          }
-          // Collect final text from the last assistant message
-          const textContent = amsg.content
+          const textContent = msg.content
             .filter(
               (c): c is { type: "text"; text: string } => c.type === "text",
             )
@@ -147,28 +122,7 @@ export async function runSubagent(options: SubagentRunOptions) {
           }
         }
       }
-
-      if (event.type === "tool_execution_start") {
-        collectedToolCalls.push({
-          name: event.toolName,
-          args: event.args as Record<string, unknown>,
-        });
-      }
     });
-
-    // --- Set up abort propagation ---
-    let aborted = false;
-    if (signal) {
-      const onAbort = () => {
-        aborted = true;
-        childSession!.abort().catch(() => {});
-      };
-      if (signal.aborted) {
-        onAbort();
-      } else {
-        signal.addEventListener("abort", onAbort, { once: true });
-      }
-    }
 
     try {
       await childSession.prompt(userPrompt, {
@@ -177,35 +131,21 @@ export async function runSubagent(options: SubagentRunOptions) {
       });
 
       if (aborted) {
-        return {
-          status: "aborted",
-          agent: agent.name,
-          summary: "Task was aborted.",
-          details: finalAssistantText || "(no output before abort)",
-          messages: collectedMessages,
-        };
+        return `本次 agent 执行终止，返回内容: 任务被中断${finalAssistantText ? "。最后输出: " + finalAssistantText : ""}`;
       }
 
-      return {
-        status: "success",
-        agent: agent.name,
-        summary: "Task completed.",
-        details: finalAssistantText || "(no output)",
-        usage: collectedUsage,
-        toolCalls: collectedToolCalls,
-        messages: collectedMessages,
-      };
+      return `本次 agent 执行完成，返回内容: ${finalAssistantText || "(无输出)"}`;
     } finally {
       unsubscribe();
+      if (onAbort && signal) {
+        signal.removeEventListener("abort", onAbort);
+      }
     }
   } catch (err: any) {
-    return {
-      status: "protocol_failure",
-      agent: agent.name,
-      summary: `Subagent execution failed: ${err?.message || "Unknown error"}`,
-      details: err?.stack || err?.message || "Unknown error",
-      messages: [],
-    };
+    if (aborted) {
+      return `本次 agent 执行终止，返回内容: 任务被中断${finalAssistantText ? "。最后输出: " + finalAssistantText : ""}`;
+    }
+    return `本次 agent 执行终止，返回内容: 执行异常 - ${err?.message || "未知错误"}`;
   } finally {
     if (childSession) {
       try {

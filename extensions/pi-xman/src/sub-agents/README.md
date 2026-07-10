@@ -1,6 +1,6 @@
 # Sub-agents
 
-子代理（sub-agent）扩展，允许主 agent 通过 `call_agent` 工具将任务委派给独立的、上下文隔离的专业子代理执行。
+子代理（sub-agent）扩展，允许主 agent 通过 `call_agent` 工具将任务委派给独立的、上下文隔离的专业子代理执行，并以自然语言返回执行结果。
 
 ## 文件结构
 
@@ -30,8 +30,8 @@ callAgent()                         [call-agent.ts]
         ├── resolveCliModel()       ← 解析 agent 配置的 model（支持 :thinking 后缀）
         ├── createAgentSession()    ← 创建内存态子 session
         ├── childSession.prompt()   ← 发送任务
-        ├── 事件收集（message_end / tool_execution_start）
-        └── 返回结果
+        ├── 收集最后一条 assistant 消息文本
+        └── 返回自然语言结果
 ```
 
 ## Agent 配置格式
@@ -66,21 +66,10 @@ You are a code reviewer. Focus on:
 
 ## 子代理协议
 
-子代理执行完成后，最后一条 assistant message 需包含 `SUBAGENT_RESULT` 标记：
-
-```
-SUBAGENT_RESULT
-status: success | failure
-summary:
-<简要结果>
-details:
-<详细证据、文件路径、失败原因>
-```
+子代理执行完成后，最后一条 assistant message 需用自然语言总结执行结果，包括任务成功与否、具体证据（文件路径、代码片段、搜索结果）或失败原因。
 
 ## 待完善
 
-- [ ] `runSubagent` 返回结果目前固定为 `{ content: [], details: {} }`，需改为结构化输出（status / summary / details / usage / toolCalls）
 - [ ] `IAgentConfig.tools` 类型标注为 `string[]`，但 loader 可能产出 `undefined`，类型需统一
 - [ ] 子代理目前无工具白名单过滤——`agent.tools` 直接传给 `createAgentSession`，若指定了不存在的工具名行为未定义
-- [ ] 执行结果中的 `usage` / `toolCalls` / `messages` 已收集但未返回给主 agent
 - [ ] `createHeadlessResourceLoader` 目前返回空资源（无 skills/prompts/themes），后续可考虑是否允许子代理加载特定资源

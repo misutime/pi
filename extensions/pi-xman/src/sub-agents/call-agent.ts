@@ -23,7 +23,7 @@ export default function callAgent(pi: ExtensionAPI): void {
     name: "call_agent",
     label: "Call Agent",
     description: `Delegate a task to a specialized sub-agent with isolated context.
-The sub-agent runs headless, uses only its configured tools, and returns a structured result with status, summary, and details.
+The sub-agent runs headless, uses only its configured tools, and returns a natural language result.
 
 Available agents:\n${agentList}`,
     parameters: Type.Object({
@@ -69,7 +69,12 @@ Available agents:\n${agentList}`,
       });
 
       return {
-        content: [],
+        content: [
+          {
+            type: "text",
+            text: result,
+          },
+        ],
         details: {},
       };
     },
