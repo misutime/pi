@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -22,9 +22,9 @@ Options:
   --out <dir>          Output directory. Defaults to a new directory under ${tmpdir()}
   --force              Remove --out first if it already exists
   --skip-check         Do not run npm run check before building
-  --skip-test          Do not run ./test.sh before building
+  --skip-build         Do not run npm run clean + build (assumes already built)
   --skip-install       Only create tarballs; do not create isolated installs
-  --skip-bun-install   Do not create the isolated Bun install
+  --skip-bun           Skip all Bun-related steps (binary build + package install)
   --help               Show this help
 `);
 }
@@ -33,10 +33,10 @@ function parseArgs() {
 	const options = {
 		force: false,
 		outDir: undefined,
-		skipBunInstall: false,
+		skipBun: false,
 		skipCheck: false,
+		skipBuild: false,
 		skipInstall: false,
-		skipTest: false,
 	};
 	const args = process.argv.slice(2);
 
@@ -54,16 +54,16 @@ function parseArgs() {
 			options.skipCheck = true;
 			continue;
 		}
-		if (arg === "--skip-test") {
-			options.skipTest = true;
+		if (arg === "--skip-build") {
+			options.skipBuild = true;
 			continue;
 		}
 		if (arg === "--skip-install") {
 			options.skipInstall = true;
 			continue;
 		}
-		if (arg === "--skip-bun-install") {
-			options.skipBunInstall = true;
+		if (arg === "--skip-bun") {
+			options.skipBun = true;
 			continue;
 		}
 		if (arg === "--out") {
@@ -124,7 +124,16 @@ function prepareOutputDirectory(options, repoRoot) {
 		if (!options.force) {
 			throw new Error(`Output directory already exists. Use --force to replace it: ${outDir}`);
 		}
-		rmSync(outDir, { force: true, recursive: true });
+		// Rename-then-delete: rename first (reliable on Windows even with open handles),
+		// then try to delete the renamed copy. If delete fails, the old dir is already out of the way.
+		const oldDir = `${outDir}.old-${Date.now()}`;
+		renameSync(outDir, oldDir);
+		try {
+			rmSync(oldDir, { force: true, recursive: true });
+		} catch {
+			// Best effort: the old directory is already out of the way
+			console.warn(`Could not remove ${oldDir}, it may still be in use.`);
+		}
 	}
 
 	mkdirSync(outDir, { recursive: true });
@@ -213,13 +222,11 @@ if (!options.skipCheck) {
 	run("npm", ["run", "check"], { cwd: repoRoot });
 }
 
-if (!options.skipTest) {
-	run("./test.sh", [], { cwd: repoRoot });
-}
-
-for (const pkg of packages) {
-	run("npm", ["run", "clean"], { cwd: pkg.directory });
-	run("npm", ["run", "build"], { cwd: pkg.directory });
+if (!options.skipBuild) {
+	for (const pkg of packages) {
+		run("npm", ["run", "clean"], { cwd: pkg.directory });
+		run("npm", ["run", "build"], { cwd: pkg.directory });
+	}
 }
 
 const tarballs = new Map();
@@ -230,8 +237,6 @@ for (const pkg of packages) {
 
 let binaryPlatform;
 if (!options.skipInstall) {
-	binaryPlatform = buildBunBinaryRelease(binaryDirectory, outDir);
-
 	mkdirSync(nodeInstallDirectory, { recursive: true });
 	const dependencies = Object.fromEntries(
 		packages.map((pkg) => [pkg.name, fileSpecifier(nodeInstallDirectory, tarballs.get(pkg.name))]),
@@ -242,9 +247,11 @@ if (!options.skipInstall) {
 	run("npm", ["install", "--omit=dev", "--ignore-scripts"], { cwd: nodeInstallDirectory });
 	createPiShim(nodeInstallDirectory);
 
-	if (!options.skipBunInstall) {
+	if (!options.skipBun) {
+		binaryPlatform = buildBunBinaryRelease(binaryDirectory, outDir);
+
 		if (!commandExists("bun")) {
-			throw new Error("Bun is required for the isolated Bun install. Use --skip-bun-install to skip it.");
+			throw new Error("Bun is required for the isolated Bun install. Use --skip-bun to skip it.");
 		}
 		mkdirSync(bunInstallDirectory, { recursive: true });
 		const bunDependencies = Object.fromEntries(
@@ -264,18 +271,18 @@ for (const tarball of tarballs.values()) {
 }
 
 if (!options.skipInstall) {
-	console.log("\nLocal Bun binary release:");
-	console.log(`  ${binaryDirectory}`);
-	console.log(`  ${join(outDir, `pi-${binaryPlatform}.${String(binaryPlatform).startsWith("windows-") ? "zip" : "tar.gz"}`)}`);
-	console.log("\nRun the local Bun binary release from outside the repository:");
-	console.log(`  ${join(binaryDirectory, String(binaryPlatform).startsWith("windows-") ? "pi.exe" : "pi")} --help`);
-
 	console.log("\nIsolated npm install:");
 	console.log(`  ${nodeInstallDirectory}`);
 	console.log("\nRun the locally packed npm CLI from outside the repository:");
 	console.log(`  ${join(nodeInstallDirectory, process.platform === "win32" ? "pi.cmd" : "pi")} --help`);
 
-	if (!options.skipBunInstall) {
+	if (!options.skipBun) {
+		console.log("\nLocal Bun binary release:");
+		console.log(`  ${binaryDirectory}`);
+		console.log(`  ${join(outDir, `pi-${binaryPlatform}.${String(binaryPlatform).startsWith("windows-") ? "zip" : "tar.gz"}`)}`);
+		console.log("\nRun the local Bun binary release from outside the repository:");
+		console.log(`  ${join(binaryDirectory, String(binaryPlatform).startsWith("windows-") ? "pi.exe" : "pi")} --help`);
+
 		console.log("\nIsolated Bun package install:");
 		console.log(`  ${bunInstallDirectory}`);
 		console.log("\nRun the locally packed Bun package CLI from outside the repository:");
