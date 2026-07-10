@@ -107,6 +107,10 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
   let finalAssistantText = "";
 
   try {
+    if (aborted) {
+      return abortMessage();
+    }
+
     await resourceLoader.reload();
 
     if (aborted) {
@@ -132,6 +136,11 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
 
     // Bind extensions so session_start handlers can register dynamic tools
     await childSession.bindExtensions({});
+
+    if (aborted) {
+      childSession.abort().catch(() => {});
+      return abortMessage();
+    }
 
     // Upgrade signal handler: now we have a session, so abort() it on signal
     if (signal && !aborted) {
