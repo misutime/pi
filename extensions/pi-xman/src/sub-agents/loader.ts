@@ -7,16 +7,17 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { IAgentConfig } from "./types.ts";
 
-export function loadAgentsFromDir(): IAgentConfig[] {
+export function loadAgentsFromDir(): { agents: IAgentConfig[]; errors: string[] } {
   const dir = path.join(getAgentDir(), "agents");
 
   const agents: IAgentConfig[] = [];
+  const errors: string[] = [];
 
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return agents;
+    return { agents, errors };
   }
 
   for (const entry of entries) {
@@ -27,20 +28,29 @@ export function loadAgentsFromDir(): IAgentConfig[] {
     let content: string;
     try {
       content = fs.readFileSync(filePath, "utf-8");
-    } catch {
+    } catch (err: any) {
+      errors.push(`${filePath}: 无法读取文件 (${err?.message ?? "未知错误"})`);
       continue;
     }
 
-    const { frontmatter, body } = (() => {
-      try {
-        return parseFrontmatter<Record<string, string | string[]>>(content);
-      } catch {
-        return { frontmatter: {} as Record<string, string | string[]>, body: content };
-      }
-    })();
+    let frontmatter: Record<string, string | string[]>;
+    let body: string;
+    try {
+      const parsed = parseFrontmatter<Record<string, string | string[]>>(content);
+      frontmatter = parsed.frontmatter;
+      body = parsed.body;
+    } catch (err: any) {
+      errors.push(`${filePath}: YAML 解析失败 (${err?.message ?? "未知错误"})`);
+      continue;
+    }
 
     // name and description are required
-    if (!frontmatter.name || !frontmatter.description) {
+    if (!frontmatter.name) {
+      errors.push(`${filePath}: 缺少 name 字段`);
+      continue;
+    }
+    if (!frontmatter.description) {
+      errors.push(`${filePath}: 缺少 description 字段`);
       continue;
     }
 
@@ -48,10 +58,21 @@ export function loadAgentsFromDir(): IAgentConfig[] {
     const rawTools = frontmatter.tools;
     let toolList: string[];
     if (Array.isArray(rawTools)) {
+      const invalidTools: number[] = [];
       toolList = rawTools
-        .filter((t): t is string => typeof t === "string")
-        .map((t) => t.trim())
+        .map((t, i) => {
+          if (typeof t !== "string") {
+            invalidTools.push(i);
+            return "";
+          }
+          return t.trim();
+        })
         .filter(Boolean);
+      if (invalidTools.length > 0) {
+        errors.push(
+          `${filePath}: tools 第 ${invalidTools.map((i) => i + 1).join(", ")} 项不是字符串`,
+        );
+      }
     } else if (typeof rawTools === "string") {
       toolList = rawTools
         .split(",")
@@ -71,5 +92,5 @@ export function loadAgentsFromDir(): IAgentConfig[] {
     });
   }
 
-  return agents;
+  return { agents, errors };
 }

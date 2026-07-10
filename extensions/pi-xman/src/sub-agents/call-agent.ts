@@ -12,7 +12,13 @@ import { loadAgentsFromDir } from "./loader.ts";
 import { runSubagent } from "./executor.ts";
 
 export default function callAgent(pi: ExtensionAPI): void {
-  const agents = loadAgentsFromDir();
+  const { agents, errors } = loadAgentsFromDir();
+
+  if (errors.length > 0) {
+    throw new Error(
+      `pi-xman: agent 配置错误，请修复后重试：\n${errors.map((e) => `  - ${e}`).join("\n")}`,
+    );
+  }
 
   const agentList =
     agents.length > 0
