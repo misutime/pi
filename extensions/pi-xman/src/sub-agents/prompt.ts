@@ -1,0 +1,72 @@
+/**
+ * Subagent prompt construction.
+ *
+ * Builds the system prompt and user prompt for child agent sessions.
+ * The system prompt includes the agent's role instructions and the completion protocol.
+ */
+
+import type { IAgentConfig } from "./types.ts";
+// ============================================================================
+// System Prompt
+// ============================================================================
+
+/**
+ * Build the system prompt for a subagent session.
+ *
+ * Contains:
+ * 1. Headless subagent identity
+ * 2. Agent-specific role instructions
+ * 3. Completion protocol instructions
+ */
+export function buildSubagentSystemPrompt(agent: IAgentConfig): string {
+  return [
+    "You are running as a headless subagent.",
+    "",
+    "You must complete the assigned task without asking the user for input.",
+    "Use only the tools available to you.",
+    "",
+    "---",
+    "",
+    "ROLE",
+    "",
+    agent.systemPrompt.trim() ||
+      `You are the "${agent.name}" specialist agent.`,
+    "",
+    "---",
+    "",
+    "COMPLETION",
+    "",
+    "When your work is done, your final assistant message must use exactly this format:",
+    "",
+    "SUBAGENT_RESULT",
+    "status: success | failure",
+    "summary:",
+    "<brief result summary>",
+    "details:",
+    "<details, evidence, files, risks, or failure reason>",
+    "",
+    "Important rules:",
+    "- Use status: success when the task was completed successfully.",
+    "- Use status: failure when the task is blocked, unsafe, impossible, or incomplete.",
+    "- The SUBAGENT_RESULT marker must appear in your LAST assistant message.",
+    "- summary: is required. Provide a concise description of what happened.",
+    "- details: must contain specific evidence: file paths, code snippets, search results, or the reason for failure.",
+    "- Do not ask the user for input. If blocked, return status: failure.",
+  ].join("\n");
+}
+
+// ============================================================================
+// User Prompt
+// ============================================================================
+
+/**
+ * Build the user prompt for a subagent session.
+ *
+ * Simple task assignment with agent identity.
+ */
+export function buildSubagentUserPrompt(
+  agent: IAgentConfig,
+  task: string,
+): string {
+  return ["AGENT", agent.name, "", "TASK", task].join("\n");
+}

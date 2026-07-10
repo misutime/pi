@@ -1,0 +1,28 @@
+{
+  "name": "pi-xman",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Xman extensions for pi: web fetch, LSP, and more",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./src/sub-agents/call-agent.ts"
+    ]
+  },
+  "scripts": {
+    "clean": "echo 'nothing to clean'",
+    "build": "echo 'nothing to build'",
+    "test": "vitest --run"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.1.9"
+  },
+  "keywords": [
+    "pi",
+    "extension"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
