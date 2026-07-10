@@ -29,6 +29,13 @@ import {
 
 export const CURRENT_SESSION_VERSION = 3;
 
+/** Format local time as ISO-like string for human-readable filenames. */
+function localFilenameTimestamp(): string {
+	const d = new Date();
+	const pad = (n: number, len = 2) => String(n).padStart(len, "0");
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+}
+
 export interface SessionHeader {
 	type: "session";
 	version?: number; // v1 sessions don't have this
@@ -880,8 +887,7 @@ export class SessionManager {
 		this.flushed = false;
 
 		if (this.persist) {
-			const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-			this.sessionFile = join(this.getSessionDir(), `${fileTimestamp}_${this.sessionId}.jsonl`);
+			this.sessionFile = join(this.getSessionDir(), `${localFilenameTimestamp()}_${this.sessionId}.jsonl`);
 		}
 		return this.sessionFile;
 	}
@@ -1351,8 +1357,7 @@ export class SessionManager {
 
 		const newSessionId = createSessionId();
 		const timestamp = new Date().toISOString();
-		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-		const newSessionFile = join(this.getSessionDir(), `${fileTimestamp}_${newSessionId}.jsonl`);
+		const newSessionFile = join(this.getSessionDir(), `${localFilenameTimestamp()}_${newSessionId}.jsonl`);
 
 		const header: SessionHeader = {
 			type: "session",
@@ -1516,8 +1521,7 @@ export class SessionManager {
 		}
 		const newSessionId = options?.id ?? createSessionId();
 		const timestamp = new Date().toISOString();
-		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-		const newSessionFile = join(dir, `${fileTimestamp}_${newSessionId}.jsonl`);
+		const newSessionFile = join(dir, `${localFilenameTimestamp()}_${newSessionId}.jsonl`);
 
 		// Write new header pointing to source as parent, with updated cwd
 		const newHeader: SessionHeader = {

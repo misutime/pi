@@ -317,6 +317,10 @@ export class AgentSession {
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	private _sessionStartEvent: SessionStartEvent;
+	private _runSystemPromptPersisted = false;
+	private _pendingSystemPromptSnapshot?: string;
+	private _pendingActiveToolNamesSnapshot?: string[];
+	private _pendingModelSnapshot?: { provider: string; id: string; maxTokens: number };
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -590,6 +594,28 @@ export class AgentSession {
 				event.message.role === "assistant" ||
 				event.message.role === "toolResult"
 			) {
+				// Persist system prompt and tools snapshot taken before the LLM call
+				if (this._pendingSystemPromptSnapshot !== undefined) {
+					this.sessionManager.appendCustomEntry("system_prompt", {
+						content: this._pendingSystemPromptSnapshot,
+					});
+					if (this._pendingModelSnapshot) {
+						this.sessionManager.appendCustomEntry("run_config", this._pendingModelSnapshot);
+					}
+					const snapshotActiveNames = new Set(this._pendingActiveToolNamesSnapshot);
+					this.sessionManager.appendCustomEntry("tools", {
+						tools: this.getAllTools()
+							.filter((t) => snapshotActiveNames.has(t.name))
+							.map((t) => ({
+								name: t.name,
+								description: t.description,
+								parameters: t.parameters,
+							})),
+					});
+					this._pendingSystemPromptSnapshot = undefined;
+					this._pendingActiveToolNamesSnapshot = undefined;
+					this._pendingModelSnapshot = undefined;
+				}
 				// Regular LLM message - persist as SessionMessageEntry
 				this.sessionManager.appendMessage(event.message);
 			}
@@ -1021,6 +1047,19 @@ export class AgentSession {
 	// =========================================================================
 
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
+		// Snapshot the system prompt and tools immediately before Agent captures its LLM context
+		if (!this._runSystemPromptPersisted) {
+			this._runSystemPromptPersisted = true;
+			this._pendingSystemPromptSnapshot = this.agent.state.systemPrompt;
+			this._pendingActiveToolNamesSnapshot = [...this.agent.state.tools.map((t) => t.name)];
+			if (this.model) {
+				this._pendingModelSnapshot = {
+					provider: this.model.provider,
+					id: this.model.id,
+					maxTokens: this.model.maxTokens,
+				};
+			}
+		}
 		this._isAgentRunActive = true;
 		try {
 			await this.agent.prompt(messages);
@@ -2537,6 +2576,10 @@ export class AgentSession {
 			activeToolNames: baseActiveToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,
 		});
+		this._runSystemPromptPersisted = false;
+		this._pendingSystemPromptSnapshot = undefined;
+		this._pendingActiveToolNamesSnapshot = undefined;
+		this._pendingModelSnapshot = undefined;
 	}
 
 	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
