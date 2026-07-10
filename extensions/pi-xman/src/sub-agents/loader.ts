@@ -31,8 +31,13 @@ export function loadAgentsFromDir(): IAgentConfig[] {
       continue;
     }
 
-    const { frontmatter, body } =
-      parseFrontmatter<Record<string, string | string[]>>(content);
+    const { frontmatter, body } = (() => {
+      try {
+        return parseFrontmatter<Record<string, string | string[]>>(content);
+      } catch {
+        return { frontmatter: {} as Record<string, string | string[]>, body: content };
+      }
+    })();
 
     // name and description are required
     if (!frontmatter.name || !frontmatter.description) {
@@ -43,7 +48,10 @@ export function loadAgentsFromDir(): IAgentConfig[] {
     const rawTools = frontmatter.tools;
     let toolList: string[];
     if (Array.isArray(rawTools)) {
-      toolList = rawTools.map((t: string) => t.trim()).filter(Boolean);
+      toolList = rawTools
+        .filter((t): t is string => typeof t === "string")
+        .map((t) => t.trim())
+        .filter(Boolean);
     } else if (typeof rawTools === "string") {
       toolList = rawTools
         .split(",")
@@ -56,7 +64,7 @@ export function loadAgentsFromDir(): IAgentConfig[] {
     agents.push({
       name: frontmatter.name,
       description: frontmatter.description,
-      tools: toolList.length > 0 ? toolList : undefined,
+      tools: toolList,
       model: frontmatter.model,
       systemPrompt: body,
       filePath,

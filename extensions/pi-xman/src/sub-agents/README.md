@@ -70,6 +70,5 @@ You are a code reviewer. Focus on:
 
 ## 待完善
 
-- [ ] `IAgentConfig.tools` 类型标注为 `string[]`，但 loader 可能产出 `undefined`，类型需统一
-- [ ] 子代理目前无工具白名单过滤——`agent.tools` 直接传给 `createAgentSession`，若指定了不存在的工具名行为未定义
-- [ ] `createHeadlessResourceLoader` 目前返回空资源（无 skills/prompts/themes），后续可考虑是否允许子代理加载特定资源
+- [ ] loader.ts 的 `parseFrontmatter` 泛型返回值类型过宽（`string | string[]`），导致 `name`/`description`/`model` 有静态类型错误，需收紧或做运行时校验
+- [ ] `tools` 含不存在工具名时无警告，`createAgentSession` 静默忽略

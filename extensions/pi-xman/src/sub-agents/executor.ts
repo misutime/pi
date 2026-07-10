@@ -29,6 +29,8 @@ export interface SubagentRunOptions {
   cwd: string;
   modelRegistry: ModelRegistry;
   signal?: AbortSignal;
+  /** Model to use when the agent config does not specify one. */
+  fallbackModel?: Model<any>;
 }
 
 // ============================================================================
@@ -36,7 +38,7 @@ export interface SubagentRunOptions {
 // ============================================================================
 
 export async function runSubagent(options: SubagentRunOptions): Promise<string> {
-  const { agent, task, cwd, modelRegistry, signal } = options;
+  const { agent, task, cwd, modelRegistry, signal, fallbackModel } = options;
 
   // --- Build prompts ---
   const systemPrompt = buildSubagentSystemPrompt(agent);
@@ -55,9 +57,35 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
 
     model = resolved.model;
     thinkingLevel = resolved.thinkingLevel;
+  } else if (fallbackModel) {
+    model = fallbackModel;
   }
 
-  // --- Create child session ---
+  // --- Set up abort signal early so it covers reload and session creation ---
+  let aborted = false;
+  let onAbort: (() => void) | undefined;
+
+  if (signal) {
+    onAbort = () => {
+      aborted = true;
+    };
+    if (signal.aborted) {
+      aborted = true;
+    } else {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
+  const cleanupSignal = () => {
+    if (onAbort && signal) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  };
+
+  const abortMessage = () =>
+    `本次 agent 执行终止，返回内容: 任务被中断${finalAssistantText ? "。最后输出: " + finalAssistantText : ""}`;
+
+  // --- Create resourceLoader ---
   const childSessionManager = SessionManager.inMemory(cwd);
   const agentDir = getAgentDir();
   const resourceLoader = new DefaultResourceLoader({
@@ -70,13 +98,17 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
     systemPrompt,
     appendSystemPrompt: [],
   });
-  await resourceLoader.reload();
+
   let childSession: AgentSession | undefined;
-  let aborted = false;
-  let onAbort: (() => void) | undefined;
   let finalAssistantText = "";
 
   try {
+    await resourceLoader.reload();
+
+    if (aborted) {
+      return abortMessage();
+    }
+
     const result = await createAgentSession({
       cwd,
       modelRegistry,
@@ -89,16 +121,24 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
 
     childSession = result.session;
 
-    // --- Set up abort propagation ---
+    if (aborted) {
+      childSession.abort().catch(() => {});
+      return abortMessage();
+    }
 
-    if (signal) {
+    // Bind extensions so session_start handlers can register dynamic tools
+    await childSession.bindExtensions({});
+
+    // Upgrade signal handler: now we have a session, so abort() it on signal
+    if (signal && !aborted) {
+      cleanupSignal();
       onAbort = () => {
         aborted = true;
         childSession?.abort()?.catch(() => {});
       };
       if (signal.aborted) {
         aborted = true;
-        childSession?.abort()?.catch(() => {});
+        childSession.abort().catch(() => {});
       } else {
         signal.addEventListener("abort", onAbort, { once: true });
       }
@@ -131,19 +171,17 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
       });
 
       if (aborted) {
-        return `本次 agent 执行终止，返回内容: 任务被中断${finalAssistantText ? "。最后输出: " + finalAssistantText : ""}`;
+        return abortMessage();
       }
 
       return `本次 agent 执行完成，返回内容: ${finalAssistantText || "(无输出)"}`;
     } finally {
       unsubscribe();
-      if (onAbort && signal) {
-        signal.removeEventListener("abort", onAbort);
-      }
+      cleanupSignal();
     }
   } catch (err: any) {
     if (aborted) {
-      return `本次 agent 执行终止，返回内容: 任务被中断${finalAssistantText ? "。最后输出: " + finalAssistantText : ""}`;
+      return abortMessage();
     }
     return `本次 agent 执行终止，返回内容: 执行异常 - ${err?.message || "未知错误"}`;
   } finally {

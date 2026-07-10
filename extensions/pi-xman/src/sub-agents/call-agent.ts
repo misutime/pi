@@ -66,6 +66,7 @@ Available agents:\n${agentList}`,
         cwd: ctx.cwd,
         modelRegistry: ctx.modelRegistry,
         signal,
+        fallbackModel: ctx.model,
       });
 
       return {
