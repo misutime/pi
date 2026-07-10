@@ -71,7 +71,18 @@ function registerTestModel(registry: ModelRegistry): void {
     baseUrl: "http://localhost:1",
     apiKey: "test-key",
     api: "openai",
-    models: [{ id: "test-model", name: "Test Model", api: "openai" }],
+    models: [
+      {
+        id: "test-model",
+        name: "Test Model",
+        api: "openai" as const,
+        reasoning: false,
+        input: ["text"] as const,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 4096,
+        maxTokens: 4096,
+      },
+    ],
   });
 }
 
