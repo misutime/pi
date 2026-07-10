@@ -15,9 +15,9 @@ export default function callAgent(pi: ExtensionAPI): void {
   const { agents, errors } = loadAgentsFromDir();
 
   if (errors.length > 0) {
-    throw new Error(
-      `pi-xman: agent 配置错误，请修复后重试：\n${errors.map((e) => `  - ${e}`).join("\n")}`,
-    );
+    const message = `pi-xman: agent 配置错误，请修复后重试：\n${errors.map((e) => `  - ${e}`).join("\n")}`;
+    console.error(`\n${message}\n`);
+    process.exit(1);
   }
 
   const agentList =
