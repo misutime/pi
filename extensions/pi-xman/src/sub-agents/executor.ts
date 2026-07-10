@@ -48,17 +48,21 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
   let model: Model<any> | undefined;
   let thinkingLevel: ThinkingLevel | undefined;
 
-  if (agent.model) {
-    const resolved = resolveCliModel({ cliModel: agent.model, modelRegistry });
+  const resolved = resolveCliModel({ cliModel: agent.model, modelRegistry });
 
-    if (resolved.error || !resolved.model) {
+  if (resolved.error || !resolved.model) {
+    if (fallbackModel) {
+      console.error(
+        `pi-xman: Agent "${agent.name}" 指定的 model "${agent.model}" 无法解析 (${resolved.error ?? "未找到"})，` +
+          `已回退到主会话模型，请修复 agent 配置。`,
+      );
+      model = fallbackModel;
+    } else {
       return `本次 agent 执行终止，返回内容: Agent "${agent.name}" 指定的 model "${agent.model}" 无法解析 (${resolved.error ?? "未找到"})。`;
     }
-
+  } else {
     model = resolved.model;
     thinkingLevel = resolved.thinkingLevel;
-  } else if (fallbackModel) {
-    model = fallbackModel;
   }
 
   // --- Set up abort signal early so it covers reload and session creation ---

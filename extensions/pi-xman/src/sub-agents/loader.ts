@@ -44,13 +44,17 @@ export function loadAgentsFromDir(): { agents: IAgentConfig[]; errors: string[] 
       continue;
     }
 
-    // name and description are required
-    if (!frontmatter.name) {
+    // name, description, and model are required
+    if (!frontmatter.name || typeof frontmatter.name !== "string") {
       errors.push(`${filePath}: 缺少 name 字段`);
       continue;
     }
-    if (!frontmatter.description) {
+    if (!frontmatter.description || typeof frontmatter.description !== "string") {
       errors.push(`${filePath}: 缺少 description 字段`);
+      continue;
+    }
+    if (!frontmatter.model || typeof frontmatter.model !== "string") {
+      errors.push(`${filePath}: 缺少 model 字段，必须指定模型`);
       continue;
     }
 

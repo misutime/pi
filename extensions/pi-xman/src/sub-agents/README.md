@@ -61,7 +61,7 @@ You are a code reviewer. Focus on:
 |------|------|------|
 | `name` | ✓ | 代理名称，LLM 通过此名称调用 |
 | `description` | ✓ | 用途描述，会嵌入 tool description 供 LLM 参考 |
-| `model` | ✗ | 指定模型，支持 `provider/model` 或 `modelId:thinkingLevel` 格式 |
+| `model` | ✓ | 指定模型，支持 `provider/model` 或 `modelId:thinkingLevel` 格式 |
 | `tools` | ✗ | 工具列表，逗号分隔字符串或 YAML 数组；不填则无工具可用 |
 
 ## 子代理协议
