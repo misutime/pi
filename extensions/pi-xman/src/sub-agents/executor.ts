@@ -176,8 +176,24 @@ export async function runSubagent(options: SubagentRunOptions) {
         source: "extension",
       });
 
+      if (aborted) {
+        return {
+          status: "aborted",
+          agent: agent.name,
+          summary: "Task was aborted.",
+          details: finalAssistantText || "(no output before abort)",
+          messages: collectedMessages,
+        };
+      }
+
       return {
-        details: finalAssistantText || "(no output before abort)",
+        status: "success",
+        agent: agent.name,
+        summary: "Task completed.",
+        details: finalAssistantText || "(no output)",
+        usage: collectedUsage,
+        toolCalls: collectedToolCalls,
+        messages: collectedMessages,
       };
     } finally {
       unsubscribe();
