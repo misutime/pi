@@ -112,7 +112,7 @@ const initialActiveToolNames: string[] = (
 
 ```ts
 export interface AgentSessionConfig {
-    initialActiveToolNames?: string[];       // 初始活跃，默认 ["read","bash","edit","write"]
+    initialActiveToolNames?: string[];       // 初始活跃，默认全部 7 个内置工具
     allowedToolNames?: string[];             // 硬 allowlist，之后无法通过 setActiveTools 绕过
     excludedToolNames?: string[];            // 硬 denylist
     customTools?: ToolDefinition[];
@@ -310,3 +310,31 @@ CLI flags > Preset 配置 > 全部 7 个内置工具
 ```
 
 过滤层（`allowedToolNames` / `excludedToolNames`）是独立硬门禁，在所有激活层逻辑之前生效：工具先进 `_refreshToolRegistry()` 的 `isAllowedTool()` 检查，被过滤掉的工具不进 registry，后续任何激活操作都无法触及。
+
+---
+
+## 启动 `[Tools]` 展示
+
+启动时终端会显示 `[Tools]` 节，列出当前加载的所有工具。
+
+实现位置：`packages/coding-agent/src/modes/interactive/interactive-mode.ts` 的 `showLoadedResources()` 方法（第 1545 行）。
+
+### 数据来源
+
+`[Tools]` 展示的是 **注册层**（`getAllTools()`），而非激活层（`getActiveToolNames()`）。与其他节（`[Skills]`、`[Extensions]`）一致——显示的是"加载了什么"。
+
+- **激活的工具**：直接显示名称
+- **未激活的工具**：名称后标注 `(inactive)`
+
+### `(inactive)` 标记的出现场景
+
+由于 CLI 的 `--tools`（→ `allowedToolNames`）和 `--exclude-tools`（→ `excludedToolNames`）都是硬过滤，被排除的工具直接不进 registry，`getAllTools()` 不会返回它们，因此 **CLI 启动时 `(inactive)` 几乎不出现**。
+
+| 场景 | Registry 内工具 | `(inactive)` 标记 |
+|------|-----------------|-------------------|
+| 默认启动（无参数） | 7 个内置 + 扩展 | 无 |
+| `--tools ls,bash` | 仅 `ls`, `bash` | 无（硬过滤，不注册） |
+| `--exclude-tools bash` | 6 个内置（缺 `bash`）+ 扩展 | 无（硬过滤，不注册） |
+| 运行时 `setActiveTools(["read"])` | 7 个内置 + 扩展 | 除 `read` 外均 `(inactive)` |
+
+`(inactive)` 标记仅在运行时通过扩展或 `/tools` 命令调用 `setActiveTools()` 缩小激活范围后，下次 reload 或 session 恢复时才会出现。

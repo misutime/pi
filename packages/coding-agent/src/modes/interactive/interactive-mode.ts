@@ -786,10 +786,7 @@ export class InteractiveMode {
 				"dim",
 				`Press ${keyText("app.tools.expand")} to show full startup help and loaded resources.`,
 			);
-			const onboarding = theme.fg(
-				"dim",
-				`Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.`,
-			);
+			const onboarding = theme.fg("dim", `Welcome to Pi. Type a message to get started.`);
 			this.builtInHeader = new ExpandableText(
 				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
 				() => `${logo}\n${expandedInstructions}\n\n${onboarding}`,
@@ -1540,6 +1537,30 @@ export class InteractiveMode {
 				});
 				const extensionCompactList = formatCompactList(this.getCompactExtensionLabels(extensions));
 				addLoadedSection("Extensions", extensionCompactList, extList, "mdHeading");
+			}
+
+			const allTools = this.session.getAllTools();
+			if (allTools.length > 0) {
+				const activeNames = new Set(this.session.getActiveToolNames());
+				const toolCompactList = formatCompactList(
+					allTools.map((t) => (activeNames.has(t.name) ? t.name : `${t.name} (inactive)`)),
+				);
+				const toolExpandedList = allTools
+					.slice()
+					.sort((a, b) => {
+						const aBuiltin = a.sourceInfo?.source === "builtin" ? 0 : 1;
+						const bBuiltin = b.sourceInfo?.source === "builtin" ? 0 : 1;
+						if (aBuiltin !== bBuiltin) return aBuiltin - bBuiltin;
+						return a.name.localeCompare(b.name);
+					})
+					.map((t) => {
+						const sourceLabel =
+							t.sourceInfo?.source && t.sourceInfo.source !== "builtin" ? ` (${t.sourceInfo.source})` : "";
+						const inactiveLabel = activeNames.has(t.name) ? "" : " (inactive)";
+						return theme.fg("dim", `  ${t.name}${sourceLabel}${inactiveLabel}`);
+					})
+					.join("\n");
+				addLoadedSection("Tools", toolCompactList, toolExpandedList);
 			}
 
 			// Show loaded themes (excluding built-in)
