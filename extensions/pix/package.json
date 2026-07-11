@@ -6,7 +6,9 @@
   "type": "module",
   "pi": {
     "extensions": [
-      "./src/tools/subagents/call-agent.ts"
+      "./src/tools/subagents/call-agent.ts",
+      "./src/tools/webtools/search.ts",
+      "./src/tools/webtools/fetch.ts"
     ]
   },
   "scripts": {
@@ -15,6 +17,8 @@
     "test": "vitest --run"
   },
   "dependencies": {
+    "exa-js": "2.16.0",
+    "firecrawl": "4.30.0",
     "jsonc-parser": "3.3.1"
   },
   "devDependencies": {
