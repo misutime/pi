@@ -6,7 +6,7 @@
   "type": "module",
   "pi": {
     "extensions": [
-      "./src/tools/subagents/call-agent.ts",
+      "./src/tools/subagents/index.ts",
       "./src/tools/webtools/index.ts"
     ]
   },
