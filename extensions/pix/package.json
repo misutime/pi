@@ -14,6 +14,9 @@
     "build": "echo 'nothing to build'",
     "test": "vitest --run"
   },
+  "dependencies": {
+    "jsonc-parser": "3.3.1"
+  },
   "devDependencies": {
     "@types/node": "26.1.1",
     "typescript": "5.9.3",

@@ -1,24 +1,27 @@
-import { homedir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { parse, printParseErrorCode } from "jsonc-parser";
+import type { ParseError } from "jsonc-parser";
 
 interface PixConfig {}
 
-export function getPixConfigDir(): string {
-  return join(homedir(), ".pi");
-}
+/** pi agent 目录下的 pix 配置路径，与 pi core 共享同一配置目录体系 */
 export function getPixConfigPath(): string {
-  return join(getPixConfigDir(), "pix-config.json");
+  return join(getAgentDir(), "pix-config.json");
 }
-const PIX_CONFIG_PATH = getPixConfigPath();
 
 export function loadConfig(): PixConfig {
-  if (!existsSync(PIX_CONFIG_PATH)) return {};
-  const raw = readFileSync(PIX_CONFIG_PATH, "utf-8");
-  try {
-    return JSON.parse(raw) as PixConfig;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to parse ${PIX_CONFIG_PATH}: ${message}`);
+  const configPath = getPixConfigPath();
+  if (!existsSync(configPath)) return {};
+  const raw = readFileSync(configPath, "utf-8");
+  const errors: ParseError[] = [];
+  const result = parse(raw, errors) as PixConfig;
+  if (errors.length > 0) {
+    const e = errors[0];
+    throw new Error(
+      `Failed to parse ${configPath} at offset ${e.offset}: ${printParseErrorCode(e.error)}`,
+    );
   }
+  return result;
 }
