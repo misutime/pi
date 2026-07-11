@@ -73,6 +73,8 @@ Available agents:\n${agentList}`,
         modelRegistry: ctx.modelRegistry,
         signal,
         fallbackModel: ctx.model,
+        timeoutMs: 10 * 60 * 1000, // 10 minutes
+        maxTurns: 30,
       });
 
       return {

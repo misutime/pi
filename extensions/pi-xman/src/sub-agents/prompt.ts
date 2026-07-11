@@ -40,6 +40,13 @@ export function buildSubagentSystemPrompt(agent: IAgentConfig): string {
     "- Describe whether the task succeeded or failed, and why.",
     "- Include specific evidence: file paths, code snippets, search results, or error details.",
     "- Do not ask the user for input. If blocked, explain the reason clearly.",
+    "",
+    "If the task cannot be completed because critical information is missing",
+    "(e.g., ambiguous file paths, unclear requirements, missing parameters),",
+    "your last message MUST use this exact format:",
+    "",
+    "本次 agent 求助, 具体问题: {describe exactly what information is missing}",
+    "请你补充上下文再 call_agent 调用一次",
   ].join("\n");
 }
 

@@ -30,6 +30,7 @@ import type {
 import {
   registerFauxProvider,
   fauxAssistantMessage,
+  fauxToolCall,
 } from "@earendil-works/pi-ai/compat";
 
 // ============================================================================
@@ -536,6 +537,13 @@ describe("prompt", () => {
     expect(prompt).toContain("test-agent");
     expect(prompt).toContain("review PR #42");
   });
+
+  it("includes help request protocol for missing information", () => {
+    const prompt = buildSubagentSystemPrompt(makeAgentConfig());
+
+    expect(prompt).toContain("本次 agent 求助, 具体问题:");
+    expect(prompt).toContain("请你补充上下文再 call_agent 调用一次");
+  });
 });
 
 // ============================================================================
@@ -754,6 +762,254 @@ describe("runSubagent", () => {
     }
   });
 
+  // --- Timeout ---
+
+  it("aborts when timeoutMs is exceeded", async () => {
+    // Factory that delays 500ms; timeout of 100ms should abort first.
+    // The factory checks the signal so it rejects cleanly when abort propagates.
+    const { modelRegistry: fauxRegistry, modelString, cleanup } =
+      setupFauxRegistry([
+        (_ctx: Context, options: StreamOptions | undefined) =>
+          new Promise<ReturnType<typeof fauxAssistantMessage>>(
+            (resolve, reject) => {
+              const id = setTimeout(
+                () => resolve(fauxAssistantMessage("too late")),
+                500,
+              );
+              if (options?.signal) {
+                options.signal.addEventListener(
+                  "abort",
+                  () => {
+                    clearTimeout(id);
+                    reject(new DOMException("Aborted", "AbortError"));
+                  },
+                  { once: true },
+                );
+              }
+            },
+          ),
+      ]);
+
+    try {
+      const result = await runSubagent({
+        agent: makeAgentConfig({ model: modelString }),
+        task: "do something",
+        cwd: tempDir,
+        modelRegistry: fauxRegistry,
+        timeoutMs: 100,
+      });
+
+      expect(result).toContain("本次 agent 执行终止");
+      expect(result).toContain("超时（100ms）");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("completes normally when task completes within timeout", async () => {
+    const { modelRegistry: fauxRegistry, modelString, cleanup } =
+      setupFauxRegistry("completed quickly");
+
+    try {
+      const result = await runSubagent({
+        agent: makeAgentConfig({ model: modelString }),
+        task: "do something",
+        cwd: tempDir,
+        modelRegistry: fauxRegistry,
+        timeoutMs: 5000,
+      });
+
+      expect(result).toContain("本次 agent 执行完成");
+      expect(result).not.toContain("超时");
+    } finally {
+      cleanup();
+    }
+  });
+
+  // --- Max turns ---
+
+  it("allows up to maxTurns assistant messages to complete", async () => {
+    // maxTurns=1 should allow a single-turn task with stopReason=stop to complete.
+    const { modelRegistry: fauxRegistry, modelString, cleanup } =
+      setupFauxRegistry("single turn response");
+
+    try {
+      const result = await runSubagent({
+        agent: makeAgentConfig({ model: modelString }),
+        task: "do something",
+        cwd: tempDir,
+        modelRegistry: fauxRegistry,
+        maxTurns: 1,
+      });
+
+      expect(result).toContain("本次 agent 执行完成");
+      expect(result).toContain("single turn response");
+      expect(result).not.toContain("超过最大轮数");
+    } finally {
+      cleanup();
+    }
+  });
+
+  // --- Provider error/aborted detection ---
+
+  it("returns execution failure when agent produces error stopReason", async () => {
+    // The agent converts provider errors to stopReason="error" and
+    // resolves prompt() normally. Executor must detect this.
+    // Use a factory so retry doesn't exhaust the response queue.
+    const { modelRegistry: fauxRegistry, modelString, cleanup } =
+      setupFauxRegistry([
+        () =>
+          fauxAssistantMessage("", {
+            stopReason: "error",
+            errorMessage: "model overloaded",
+          }),
+      ]);
+
+    try {
+      const result = await runSubagent({
+        agent: makeAgentConfig({ model: modelString }),
+        task: "do something",
+        cwd: tempDir,
+        modelRegistry: fauxRegistry,
+      });
+
+      expect(result).toContain("本次 agent 执行终止");
+      expect(result).toContain("执行异常");
+      expect(result).not.toContain("本次 agent 执行完成");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("returns execution failure when agent produces aborted stopReason", async () => {
+    const { modelRegistry: fauxRegistry, modelString, cleanup } =
+      setupFauxRegistry([
+        fauxAssistantMessage("partial output", {
+          stopReason: "aborted",
+        }),
+      ]);
+
+    try {
+      const result = await runSubagent({
+        agent: makeAgentConfig({ model: modelString }),
+        task: "do something",
+        cwd: tempDir,
+        modelRegistry: fauxRegistry,
+      });
+
+      expect(result).toContain("本次 agent 执行终止");
+      expect(result).toContain("执行异常");
+      expect(result).toContain("partial output");
+      expect(result).not.toContain("本次 agent 执行完成");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("reports output truncation when agent stops with length", async () => {
+    // stopReason="length" means the model hit the token limit —
+    // the output is incomplete and should not be reported as success.
+    const { modelRegistry: fauxRegistry, modelString, cleanup } =
+      setupFauxRegistry([
+        fauxAssistantMessage("truncated incomplete result", {
+          stopReason: "length",
+        }),
+      ]);
+
+    try {
+      const result = await runSubagent({
+        agent: makeAgentConfig({ model: modelString }),
+        task: "do something",
+        cwd: tempDir,
+        modelRegistry: fauxRegistry,
+      });
+
+      expect(result).toContain("本次 agent 执行终止");
+      expect(result).toContain("输出被截断");
+      expect(result).toContain("truncated incomplete result");
+      expect(result).not.toContain("本次 agent 执行完成");
+    } finally {
+      cleanup();
+    }
+  });
+
+  // --- Max turns toolUse prevention ---
+
+  it("prevents next model call when maxTurns reached with toolUse", async () => {
+    // First response returns a tool call (stopReason=toolUse).
+    // With maxTurns=1 via shouldStopAfterTurn, the agent loop stops after
+    // turn_end, before making a second LLM request.
+    const authStorage = AuthStorage.inMemory();
+    const fauxRegistry = ModelRegistry.inMemory(authStorage);
+    const faux = registerFauxProvider({
+      models: [{ id: "faux-mt", reasoning: false }],
+    });
+    faux.setResponses([
+      () =>
+        fauxAssistantMessage(
+          fauxToolCall("read", { path: "/" }),
+          { stopReason: "toolUse" },
+        ),
+    ]);
+    const model = faux.getModel();
+    authStorage.setRuntimeApiKey(model.provider, "faux-key");
+    fauxRegistry.registerProvider(model.provider, {
+      baseUrl: model.baseUrl,
+      apiKey: "faux-key",
+      api: faux.api,
+      models: faux.models.map((m) => ({
+        id: m.id,
+        name: m.name,
+        api: m.api,
+        reasoning: m.reasoning,
+        input: m.input,
+        cost: m.cost,
+        contextWindow: m.contextWindow,
+        maxTokens: m.maxTokens,
+      })),
+    });
+
+    try {
+      const result = await runSubagent({
+        agent: makeAgentConfig({
+          model: `${model.provider}/${model.id}`,
+          tools: ["read"],
+        }),
+        task: "do something",
+        cwd: tempDir,
+        modelRegistry: fauxRegistry,
+        maxTurns: 1,
+      });
+
+      expect(result).toContain("本次 agent 执行终止");
+      expect(result).toContain("达到最大轮数（1）");
+      // shouldStopAfterTurn prevents the second LLM call entirely.
+      expect(faux.state.callCount).toBe(1);
+    } finally {
+      faux.unregister();
+    }
+  });
+
+  it("completes normally when turn count stays within maxTurns", async () => {
+    const { modelRegistry: fauxRegistry, modelString, cleanup } =
+      setupFauxRegistry("only one turn");
+
+    try {
+      const result = await runSubagent({
+        agent: makeAgentConfig({ model: modelString }),
+        task: "do something",
+        cwd: tempDir,
+        modelRegistry: fauxRegistry,
+        maxTurns: 5,
+      });
+
+      expect(result).toContain("本次 agent 执行完成");
+      expect(result).not.toContain("超过最大轮数");
+    } finally {
+      cleanup();
+    }
+  });
+
   // --- Abort during bindExtensions (before prompt) ---
 
   it("never calls provider when aborted before bindExtensions", async () => {
@@ -792,6 +1048,59 @@ describe("runSubagent", () => {
     } finally {
       AgentSession.prototype.bindExtensions = originalBindExtensions;
       abortSpy.mockRestore();
+      cleanup();
+    }
+  });
+
+  // --- Timeout fires before external signal, reason not overwritten ---
+
+  it("keeps timeout reason when external signal fires later", async () => {
+    // Factory delays 500ms; timeout at 100ms should win.
+    const { modelRegistry: fauxRegistry, modelString, cleanup } =
+      setupFauxRegistry([
+        (_ctx: Context, options: StreamOptions | undefined) =>
+          new Promise<ReturnType<typeof fauxAssistantMessage>>(
+            (resolve, reject) => {
+              const id = setTimeout(
+                () => resolve(fauxAssistantMessage("too late")),
+                500,
+              );
+              if (options?.signal) {
+                options.signal.addEventListener(
+                  "abort",
+                  () => {
+                    clearTimeout(id);
+                    reject(new DOMException("Aborted", "AbortError"));
+                  },
+                  { once: true },
+                );
+              }
+            },
+          ),
+      ]);
+
+    const controller = new AbortController();
+
+    try {
+      const resultPromise = runSubagent({
+        agent: makeAgentConfig({ model: modelString }),
+        task: "do something",
+        cwd: tempDir,
+        modelRegistry: fauxRegistry,
+        signal: controller.signal,
+        timeoutMs: 100,
+      });
+
+      // After timeout fires (100ms), also trigger external abort
+      await new Promise((r) => setTimeout(r, 150));
+      controller.abort();
+
+      const result = await resultPromise;
+
+      // Timeout reason should win, not "任务被中断"
+      expect(result).toContain("超时（100ms）");
+      expect(result).not.toContain("任务被中断");
+    } finally {
       cleanup();
     }
   });

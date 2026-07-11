@@ -2,7 +2,7 @@
  * Subagent executor — creates child sessions and runs subagent tasks.
  */
 
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ThinkingLevel, ShouldStopAfterTurnContext } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai/compat";
 import {
   type AgentSession,
@@ -31,6 +31,10 @@ export interface SubagentRunOptions {
   signal?: AbortSignal;
   /** Model to use when the agent config does not specify one. */
   fallbackModel?: Model<any>;
+  /** 总超时（毫秒）。超时后自动中止子代理并返回终止消息。 */
+  timeoutMs?: number;
+  /** 最大对话轮数（assistant message 计数）。超出后自动中止子代理。 */
+  maxTurns?: number;
 }
 
 // ============================================================================
@@ -38,7 +42,7 @@ export interface SubagentRunOptions {
 // ============================================================================
 
 export async function runSubagent(options: SubagentRunOptions): Promise<string> {
-  const { agent, task, cwd, modelRegistry, signal, fallbackModel } = options;
+  const { agent, task, cwd, modelRegistry, signal, fallbackModel, timeoutMs, maxTurns } = options;
 
   // --- Build prompts ---
   const systemPrompt = buildSubagentSystemPrompt(agent);
@@ -65,29 +69,72 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
     thinkingLevel = resolved.thinkingLevel;
   }
 
-  // --- Set up abort signal early so it covers reload and session creation ---
+  // --- Abort infrastructure ---
+  // Single entry point for all abort sources: external signal, timeout, maxTurns.
   let aborted = false;
-  let onAbort: (() => void) | undefined;
+  let abortReason = "任务被中断";
+  let turnCount = 0;
+  let childSession: AgentSession | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let signalListener: (() => void) | undefined;
+  let finalAssistantText = "";
+  let finalStopReason: string | undefined;
+  let finalErrorMessage: string | undefined;
 
-  if (signal) {
-    onAbort = () => {
-      aborted = true;
-    };
-    if (signal.aborted) {
-      aborted = true;
-    } else {
-      signal.addEventListener("abort", onAbort, { once: true });
+  const triggerAbort = (reason: string) => {
+    if (aborted) return;
+    aborted = true;
+    if (!abortReason || abortReason === "任务被中断") {
+      abortReason = reason;
     }
-  }
+    // Fire-and-forget: if session exists, abort it; if not yet created,
+    // the check points below will catch the aborted flag.
+    childSession?.abort()?.catch(() => {});
+  };
 
-  const cleanupSignal = () => {
-    if (onAbort && signal) {
-      signal.removeEventListener("abort", onAbort);
+  const cleanupAbort = () => {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+      timeoutId = undefined;
+    }
+    if (signalListener && signal) {
+      signal.removeEventListener("abort", signalListener);
+      signalListener = undefined;
     }
   };
 
+  // Wire external signal
+  if (signal) {
+    if (signal.aborted) {
+      triggerAbort("任务被中断");
+    } else {
+      signalListener = () => triggerAbort("任务被中断");
+      signal.addEventListener("abort", signalListener, { once: true });
+    }
+  }
+
+  // Set timeout
+  if (timeoutMs !== undefined) {
+    timeoutId = setTimeout(() => triggerAbort(`超时（${timeoutMs}ms）`), timeoutMs);
+  }
+
   const abortMessage = () =>
-    `本次 agent 执行终止，返回内容: 任务被中断${finalAssistantText ? "。最后输出: " + finalAssistantText : ""}`;
+    `本次 agent 执行终止，返回内容: ${abortReason}${finalAssistantText ? "。最后输出: " + finalAssistantText : ""}`;
+
+  // --- shouldStopAfterTurn for precise turn budget ---
+  // Runs after turn_end (tools done, before next LLM call), guarantees
+  // no N+1-th model call. Only toolUse triggers another LLM request;
+  // stop/length/error/aborted are terminal and should not be blocked.
+  let stoppedByTurnBudget = false;
+  const turnBudgetHook =
+    maxTurns !== undefined
+      ? (ctx: ShouldStopAfterTurnContext) => {
+          if (turnCount < maxTurns) return false;
+          if (ctx.message.stopReason !== "toolUse") return false;
+          stoppedByTurnBudget = true;
+          return true;
+        }
+      : undefined;
 
   // --- Create resourceLoader ---
   const childSessionManager = SessionManager.inMemory(cwd);
@@ -102,9 +149,6 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
     systemPrompt,
     appendSystemPrompt: [],
   });
-
-  let childSession: AgentSession | undefined;
-  let finalAssistantText = "";
 
   try {
     if (aborted) {
@@ -125,12 +169,12 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
       thinkingLevel,
       tools: agent.tools,
       resourceLoader,
+      shouldStopAfterTurn: turnBudgetHook,
     });
 
     childSession = result.session;
 
     if (aborted) {
-      childSession.abort().catch(() => {});
       return abortMessage();
     }
 
@@ -138,32 +182,19 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
     await childSession.bindExtensions({});
 
     if (aborted) {
-      childSession.abort().catch(() => {});
       return abortMessage();
     }
 
-    // Upgrade signal handler: now we have a session, so abort() it on signal
-    if (signal && !aborted) {
-      cleanupSignal();
-      onAbort = () => {
-        aborted = true;
-        childSession?.abort()?.catch(() => {});
-      };
-      if (signal.aborted) {
-        aborted = true;
-        childSession.abort().catch(() => {});
-      } else {
-        signal.addEventListener("abort", onAbort, { once: true });
-      }
-    }
-
-    // --- Set up event collection ---
+    // --- Set up event collection with turn counting ---
 
     const unsubscribe = childSession.subscribe((event) => {
       if (event.type === "message_end") {
         const msg = event.message;
 
         if (msg.role === "assistant") {
+          turnCount++;
+          finalStopReason = msg.stopReason;
+          finalErrorMessage = msg.errorMessage;
           const textContent = msg.content
             .filter(
               (c): c is { type: "text"; text: string } => c.type === "text",
@@ -187,10 +218,21 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
         return abortMessage();
       }
 
+      // Detecting terminal stop reasons that are not successful completions.
+      if (finalStopReason === "error" || finalStopReason === "aborted") {
+        return `本次 agent 执行终止，返回内容: 执行异常 - ${finalErrorMessage || "未知错误"}${finalAssistantText ? "。最后输出: " + finalAssistantText : ""}`;
+      }
+      if (finalStopReason === "length") {
+        return `本次 agent 执行终止，返回内容: 输出被截断（达到 token 上限），请缩小任务范围或提高输出预算重试。最后输出: ${finalAssistantText || "(无输出)"}`;
+      }
+
+      if (stoppedByTurnBudget) {
+        return `本次 agent 执行终止，返回内容: 达到最大轮数（${maxTurns}），已完成 ${turnCount} 轮对话${finalAssistantText ? "。最后输出: " + finalAssistantText : ""}`;
+      }
+
       return `本次 agent 执行完成，返回内容: ${finalAssistantText || "(无输出)"}`;
     } finally {
       unsubscribe();
-      cleanupSignal();
     }
   } catch (err: any) {
     if (aborted) {
@@ -198,6 +240,7 @@ export async function runSubagent(options: SubagentRunOptions): Promise<string> 
     }
     return `本次 agent 执行终止，返回内容: 执行异常 - ${err?.message || "未知错误"}`;
   } finally {
+    cleanupAbort();
     if (childSession) {
       try {
         childSession.dispose();
