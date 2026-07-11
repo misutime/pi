@@ -65,11 +65,18 @@ export interface SearchResult {
 	description: string;
 }
 
+/** search() 的返回类型 */
+export interface SearchResponse {
+	results: SearchResult[];
+	/** Gemini 的 LLM 生成答案（Firecrawl/Exa 无此字段） */
+	answer?: string;
+}
+
 /**
  * 执行 web 搜索，返回格式化的结果列表。
  * 调用方负责 abort signal 集成和内容截断。
  */
-export async function search(params: SearchParams): Promise<SearchResult[]> {
+export async function search(params: SearchParams): Promise<SearchResponse> {
 	const firecrawl = getFirecrawlClient();
 	const limit = normalizeSearchLimit(params.limit);
 
@@ -82,13 +89,19 @@ export async function search(params: SearchParams): Promise<SearchResult[]> {
 
 	const web = data.web ?? [];
 
-	return web
-		.filter((r): r is typeof r & { url: string } => typeof r.url === "string")
-		.map((r) => ({
-			title: r.title ?? "Untitled",
-			url: r.url,
-			description: r.description ?? "",
-		}));
+	// web 元素类型为 SearchResultWeb | Document。SearchResultWeb 有 url/title/description，
+	// Document 的元数据在 metadata 子对象下。统一用 SearchResultWeb 的形状过滤。
+	const results: SearchResult[] = [];
+	for (const r of web) {
+		if (typeof (r as { url?: unknown }).url !== "string") continue;
+		results.push({
+			title: (r as { title?: string }).title ?? "Untitled",
+			url: (r as { url: string }).url,
+			description: (r as { description?: string }).description ?? "",
+		});
+	}
+
+	return { results };
 }
 
 // ============================================================================

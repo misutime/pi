@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { parse, printParseErrorCode } from "jsonc-parser";
+import { parse, printParseErrorCode, stripComments } from "jsonc-parser";
 import type { ParseError } from "jsonc-parser";
 
 // ============================================================================
@@ -11,6 +11,7 @@ import type { ParseError } from "jsonc-parser";
 interface PixConfig {
 	firecrawl?: { apiKey?: string };
 	exa?: { apiKey?: string };
+	gemini?: { apiKey?: string; searchModel?: string };
 }
 
 // ============================================================================
@@ -19,7 +20,7 @@ interface PixConfig {
 
 /** pi agent 目录下的 pix 配置路径，与 pi core 共享同一配置目录体系 */
 export function getPixConfigPath(): string {
-	return join(getAgentDir(), "pix-config.json");
+	return join(getAgentDir(), "pix-config.jsonc");
 }
 
 // ============================================================================
@@ -39,12 +40,20 @@ export function loadConfig(): PixConfig {
 	const raw = readFileSync(configPath, "utf-8");
 	const errors: ParseError[] = [];
 	const result = parse(raw, errors) as PixConfig;
-	if (errors.length > 0) {
+
+	// jsonc-parser 遇到尾逗号等 JSONC 特性会记录非致命错误但依然成功解析。
+	// 去掉注释后，再移除尾逗号（JSONC 合法但标准 JSON 不合法），
+	// 然后尝试 JSON.parse。通过则只有 JSONC 特性差异；失败则是真正的语法错误。
+	const stripped = stripComments(raw).replace(/,(\s*[}\]])/g, "$1");
+	try {
+		JSON.parse(stripped);
+	} catch {
 		const e = errors[0];
 		throw new Error(
-			`Failed to parse ${configPath} at offset ${e.offset}: ${printParseErrorCode(e.error)}`,
+			`Failed to parse ${configPath}${e ? ` at offset ${e.offset}: ${printParseErrorCode(e.error)}` : ""}`,
 		);
 	}
+
 	cachedConfig = result;
 	return result;
 }
@@ -103,4 +112,14 @@ export function hasExaApiKey(): boolean {
 /** 获取 Exa API Key（无配置时抛错） */
 export function getExaApiKey(): string {
 	return requireApiKey("exa", "EXA_API_KEY", "Exa");
+}
+
+/** 检查 Gemini API Key 是否已配置 */
+export function hasGeminiApiKey(): boolean {
+	return resolveApiKey("gemini", "GEMINI_API_KEY") !== undefined;
+}
+
+/** 获取 Gemini API Key（无配置时抛错） */
+export function getGeminiApiKey(): string {
+	return requireApiKey("gemini", "GEMINI_API_KEY", "Gemini");
 }

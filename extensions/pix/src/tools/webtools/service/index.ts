@@ -1,37 +1,72 @@
 /**
- * Service router — 根据已配置的 API key（env 或 pix-config.json）随机选择 provider。
+ * Service router — 多 provider 回退策略。
  *
- * 目的：分散请求负载，避免单一 provider 限流。
- * 规则：fetch 仅 Firecrawl 支持；search 在已配置的 provider 中随机挑选。
+ * - search: firecrawl + exa 随机排列，gemini 固定末尾（成本最高，最后回退）
+ * - fetch: 仅 Firecrawl 支持
+ * - 所有 provider 均失败时才抛错
  */
 
-import { hasFirecrawlApiKey, hasExaApiKey } from "../../../shared/config.ts";
+import { hasFirecrawlApiKey, hasExaApiKey, hasGeminiApiKey } from "../../../shared/config.ts";
 import { search as firecrawlSearch, fetch as firecrawlFetch } from "./firecrawl.ts";
 import { search as exaSearch } from "./exa.ts";
-import type { SearchParams, SearchResult, FetchParams, FetchResult } from "./firecrawl.ts";
+import { search as geminiSearch } from "./gemini.ts";
+import type { SearchParams, SearchResponse, FetchParams, FetchResult } from "./firecrawl.ts";
 
-function chooseSearchProvider(): "firecrawl" | "exa" {
-	const available: Array<"firecrawl" | "exa"> = [];
+type SearchProvider = "firecrawl" | "exa" | "gemini";
 
-	if (hasFirecrawlApiKey()) available.push("firecrawl");
-	if (hasExaApiKey()) available.push("exa");
+const SEARCH_IMPLS: Record<SearchProvider, (p: SearchParams) => Promise<SearchResponse>> = {
+	firecrawl: firecrawlSearch,
+	exa: exaSearch,
+	gemini: geminiSearch,
+};
 
-	if (available.length === 0) {
+function getSearchProviders(): SearchProvider[] {
+	// firecrawl + exa 随机排列均衡负载，gemini 固定末尾（成本最高，最后回退）
+	const primary: SearchProvider[] = [];
+	if (hasFirecrawlApiKey()) primary.push("firecrawl");
+	if (hasExaApiKey()) primary.push("exa");
+
+	const result = shuffle(primary);
+
+	if (hasGeminiApiKey()) result.push("gemini");
+
+	if (result.length === 0) {
 		throw new Error(
 			"No search provider configured. " +
-				"Set FIRECRAWL_API_KEY or EXA_API_KEY, " +
-				"or add firecrawl.apiKey / exa.apiKey in pix-config.json.",
+				"Set FIRECRAWL_API_KEY, EXA_API_KEY, or GEMINI_API_KEY, " +
+				"or add firecrawl.apiKey / exa.apiKey / gemini.apiKey in pix-config.jsonc.",
 		);
 	}
 
-	// 随机分配，分散请求压力
-	return available[Math.floor(Math.random() * available.length)];
+	return result;
 }
 
-export async function search(params: SearchParams): Promise<SearchResult[]> {
-	return chooseSearchProvider() === "firecrawl"
-		? firecrawlSearch(params)
-		: exaSearch(params);
+/** Fisher-Yates shuffle */
+function shuffle<T>(arr: T[]): T[] {
+	const a = [...arr];
+	for (let i = a.length - 1; i > 0; i--) {
+		const j = Math.floor(Math.random() * (i + 1));
+		[a[i], a[j]] = [a[j], a[i]];
+	}
+	return a;
+}
+
+export async function search(params: SearchParams): Promise<SearchResponse> {
+	const providers = getSearchProviders();
+	const errors: string[] = [];
+
+	for (const provider of providers) {
+		try {
+			return await SEARCH_IMPLS[provider](params);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			errors.push(`${provider}: ${msg}`);
+		}
+	}
+
+	throw new Error(
+		`All search providers failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
+	);
 }
 
 export async function fetch(params: FetchParams): Promise<FetchResult> {

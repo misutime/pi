@@ -5,7 +5,7 @@
  * providers (Firecrawl → Exa → Gemini Search) without touching this file.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { search } from "./service/index.ts";
 import { applyTruncation, raceWithAbort } from "./format.ts";
@@ -38,7 +38,7 @@ export default function websearch(pi: ExtensionAPI): void {
 				}),
 			),
 		}),
-		execute: async (_toolCallId, params, signal) => {
+		execute: async (_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> => {
 			const includeDomains = normalizeDomains(params.includeDomains);
 			const excludeDomains = normalizeDomains(params.excludeDomains);
 			if (includeDomains && excludeDomains) {
@@ -53,32 +53,43 @@ export default function websearch(pi: ExtensionAPI): void {
 				};
 			}
 
-			const results = await raceWithAbort(
-				search(
-					{
-						query: params.query as string,
-						limit: params.limit as number | undefined,
-						includeDomains,
-						excludeDomains,
-					},
-					signal,
-				),
+			const response = await raceWithAbort(
+				search({
+					query: params.query as string,
+					limit: params.limit as number | undefined,
+					includeDomains,
+					excludeDomains,
+				}),
 				signal,
 			);
 
+			const { results, answer } = response;
+
 			if (results.length === 0) {
 				return {
-					content: [{ type: "text", text: "No search results found." }],
+					content: [{ type: "text", text: answer || "No search results found." }],
 					details: { resultCount: 0 },
 				};
 			}
 
-			let text = `Found ${results.length} results:\n\n`;
-			for (const r of results) {
-				text += `### ${r.title}\n`;
-				text += `URL: ${r.url}\n`;
-				if (r.description) text += `${r.description}\n`;
-				text += "\n---\n\n";
+			let text = "";
+
+			// Gemini 返回的 LLM 答案（含行内引用）优先展示
+			if (answer) {
+				text += `${answer}
+
+---
+
+`;
+			}
+
+			text += `Found ${results.length} results:\n\n`;
+			for (let i = 0; i < results.length; i++) {
+				const r = results[i];
+				const num = answer ? `[${i + 1}] ` : "";
+				text += `${num}**${r.title}**\n`;
+				text += `   ${r.url}\n`;
+				if (r.description) text += `   ${r.description}\n`;
 			}
 
 			return {

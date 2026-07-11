@@ -7,9 +7,9 @@
  * 页面内容可通过 `contents.text` 在搜索时一并获取，但 fetch() 不适用于 Exa。
  */
 
-import Exa from "exa-js";
+import { Exa } from "exa-js";
 import { getExaApiKey } from "../../../shared/config.ts";
-import type { SearchParams, SearchResult } from "./firecrawl.ts";
+import type { SearchParams, SearchResponse } from "./firecrawl.ts";
 
 // ============================================================================
 // Client 单例（API key 来自 pix 配置文件）
@@ -32,7 +32,7 @@ function getExaClient(): Exa {
  *
  * Exa 没有 limit/includeDomains/excludeDomains 的严格上限。
  */
-export async function search(params: SearchParams): Promise<SearchResult[]> {
+export async function search(params: SearchParams): Promise<SearchResponse> {
 	const exa = getExaClient();
 
 	const response = await exa.search(params.query, {
@@ -47,9 +47,11 @@ export async function search(params: SearchParams): Promise<SearchResult[]> {
 			: {}),
 	});
 
-	return response.results.map((r) => ({
-		title: r.title ?? "Untitled",
-		url: r.url,
-		description: r.highlights?.[0] ?? "",
-	}));
+	return {
+		results: response.results.map((r) => ({
+			title: r.title ?? "Untitled",
+			url: r.url,
+			description: r.highlights?.[0] ?? "",
+		})),
+	};
 }
