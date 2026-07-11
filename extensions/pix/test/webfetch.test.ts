@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fetchContent } from "../src/webfetch/fetch.ts";
+import { fetchContent } from "../src/tools/webfetch/fetch.ts";
 
 describe("webfetch", () => {
 	describe("fetchContent", () => {

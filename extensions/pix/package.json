@@ -6,7 +6,7 @@
   "type": "module",
   "pi": {
     "extensions": [
-      "./src/sub-agents/call-agent.ts"
+      "./src/tools/subagents/call-agent.ts"
     ]
   },
   "scripts": {
@@ -15,6 +15,7 @@
     "test": "vitest --run"
   },
   "devDependencies": {
+    "@types/node": "26.1.1",
     "typescript": "5.9.3",
     "vitest": "4.1.9"
   },

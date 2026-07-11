@@ -2,14 +2,14 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadAgentsFromDir } from "../src/sub-agents/loader.ts";
+import { loadAgentsFromDir } from "../src/tools/subagents/loader.ts";
 import {
   buildSubagentSystemPrompt,
   buildSubagentUserPrompt,
-} from "../src/sub-agents/prompt.ts";
-import { runSubagent } from "../src/sub-agents/executor.ts";
-import type { IAgentConfig } from "../src/sub-agents/types.ts";
-import callAgent from "../src/sub-agents/call-agent.ts";
+} from "../src/tools/subagents/prompt.ts";
+import { runSubagent } from "../src/tools/subagents/executor.ts";
+import type { IAgentConfig } from "../src/tools/subagents/types.ts";
+import callAgent from "../src/tools/subagents/call-agent.ts";
 import {
   AgentSession,
   AuthStorage,
