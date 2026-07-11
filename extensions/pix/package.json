@@ -7,8 +7,7 @@
   "pi": {
     "extensions": [
       "./src/tools/subagents/call-agent.ts",
-      "./src/tools/webtools/search.ts",
-      "./src/tools/webtools/fetch.ts"
+      "./src/tools/webtools/index.ts"
     ]
   },
   "scripts": {
