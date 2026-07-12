@@ -71,9 +71,10 @@ function parseRepoUrl(url: string): { owner: string; repo: string; ref?: string;
 
 	if (parts.length >= 3 && (parts[2] === "blob" || parts[2] === "tree")) {
 		result.type = parts[2];
-		// 取所有剩余段作为 path（不区分 ref/path，branch 名可能含 /）。
-		// ref 总是通过 fetchDefaultBranch 解析。
-		if (parts.length >= 4) result.path = parts.slice(3).join("/");
+		// 注意：暂不支持 ref 含 / 的 URL（如 /blob/feature/foo/src/a.ts）。
+		// 这种情况下 ref 会被误判——请改用 repo + path 参数模式。
+		if (parts.length >= 4) result.ref = parts[3];
+		if (parts.length >= 5) result.path = parts.slice(4).join("/");
 	}
 
 	return result;
@@ -461,7 +462,8 @@ export default function githubRepoView(pi: ExtensionAPI): void {
 			"查看 GitHub 仓库结构、README 和文件内容。" +
 			" 可用于快速了解项目架构、查看目录树、或读取特定文件。" +
 			" 支持完整 URL、owner/repo 格式、或自动推断当前工作目录的 git 仓库。" +
-			" 注：始终读取默认分支内容；如需指定分支/标签/commit，请使用 repo+path 模式后追加 ref 参数（暂未开放）。",
+			" 注：URL 模式暂不支持含 / 的分支名（如 /blob/feature/foo/src/a.ts），" +
+			" 请改用 repo + path 参数。",
 		promptSnippet: "Use to explore a GitHub repository's structure, README, and file contents.",
 		parameters: Type.Object({
 			url: Type.Optional(
