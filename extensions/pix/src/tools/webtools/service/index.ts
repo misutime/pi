@@ -3,7 +3,7 @@
  *
  * - search: firecrawl + exa 随机排列，gemini 固定末尾（成本最高，最后回退）
  * - fetch: firecrawl → jina → readability 顺序回退，含内容有效性校验
- * - 所有 provider 均失败时才抛错
+ * - 无可用 provider 或全部失败时返回提示信息，不抛错
  */
 
 import { hasFirecrawlApiKey, hasExaApiKey, hasGeminiApiKey } from "../../../shared/config.ts";
@@ -52,14 +52,6 @@ function getSearchProviders(): SearchProvider[] {
 
 	if (hasGeminiApiKey()) result.push("gemini");
 
-	if (result.length === 0) {
-		throw new Error(
-			"No search provider configured. " +
-				"Set FIRECRAWL_API_KEY, EXA_API_KEY, or GEMINI_API_KEY, " +
-				"or add firecrawl.apiKey / exa.apiKey / gemini.apiKey in pix-config.jsonc.",
-		);
-	}
-
 	return result;
 }
 
@@ -75,6 +67,14 @@ function shuffle<T>(arr: T[]): T[] {
 
 export async function search(params: SearchParams): Promise<SearchResponse> {
 	const providers = getSearchProviders();
+
+	if (providers.length === 0) {
+		return {
+			results: [],
+			answer: "Web search is not available because no search provider is configured. Tell the user to configure at least one search API key (Firecrawl, Exa, or Gemini).",
+		};
+	}
+
 	const errors: string[] = [];
 
 	for (const provider of providers) {
@@ -86,9 +86,10 @@ export async function search(params: SearchParams): Promise<SearchResponse> {
 		}
 	}
 
-	throw new Error(
-		`All search providers failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
-	);
+	return {
+		results: [],
+		answer: `All search providers failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
+	};
 }
 
 // ============================================================================
@@ -115,12 +116,14 @@ const MIN_MARKDOWN_LENGTH = 1; // 仅拒绝空字符串，短内容（图片 URL
 
 export async function fetch(params: FetchParams, signal?: AbortSignal): Promise<FetchResult> {
 	const providers = getFetchProviders();
-	const errors: string[] = [];
 
 	for (const provider of providers) {
 		// Abort 检查 — 用户取消了就不再继续
 		if (signal?.aborted) {
-			throw new Error(signal.reason ?? "Aborted");
+			return {
+				markdown: `Fetch aborted: ${signal.reason ?? "Aborted"}`,
+				sourceURL: params.url,
+			};
 		}
 
 		try {
@@ -128,20 +131,18 @@ export async function fetch(params: FetchParams, signal?: AbortSignal): Promise<
 
 			// 内容有效性校验 — 空 markdown 视为失败，继续回退
 			if ((result.markdown ?? "").trim().length < MIN_MARKDOWN_LENGTH) {
-				errors.push(`${provider}: returned empty content`);
 				continue;
 			}
 
 			return result;
-		} catch (err) {
+		} catch (_err) {
 			// 任何错误都继续回退。Firecrawl/Jina 的 403/429 可能是 provider
 			// 自身的限制，不代表本地 Readability 不能正常抓取。
-			const msg = err instanceof Error ? err.message : String(err);
-			errors.push(`${provider}: ${msg}`);
 		}
 	}
 
-	throw new Error(
-		`All fetch providers failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
-	);
+	return {
+		markdown: "Failed to fetch the URL. All content providers returned errors.",
+		sourceURL: params.url,
+	};
 }

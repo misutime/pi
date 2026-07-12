@@ -19,7 +19,11 @@ let clientInstance: Exa | undefined;
 
 function getExaClient(): Exa {
 	if (clientInstance) return clientInstance;
-	clientInstance = new Exa(getExaApiKey());
+	const apiKey = getExaApiKey();
+	if (!apiKey) {
+		throw new Error("Exa API key not configured");
+	}
+	clientInstance = new Exa(apiKey);
 	return clientInstance;
 }
 

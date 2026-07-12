@@ -5,7 +5,7 @@
  * 配置 JINA_API_KEY 或 pix-config.jsonc 中的 jina.apiKey 可提升速率限制。
  */
 
-import { hasJinaApiKey, getJinaApiKey } from "../../../shared/config.ts";
+import { getJinaApiKey } from "../../../shared/config.ts";
 import type { FetchParams, FetchResult } from "./index.ts";
 
 const JINA_BASE = "https://r.jina.ai/";
@@ -21,8 +21,9 @@ export async function fetch(params: FetchParams): Promise<FetchResult> {
 		"Accept": "text/markdown",
 		"X-No-Cache": "true",
 	};
-	if (hasJinaApiKey()) {
-		headers["Authorization"] = `Bearer ${getJinaApiKey()}`;
+	const jinaKey = getJinaApiKey();
+	if (jinaKey) {
+		headers["Authorization"] = `Bearer ${jinaKey}`;
 	}
 
 	const response = await globalThis.fetch(JINA_BASE + params.url, {

@@ -14,7 +14,7 @@ import type { FetchParams, FetchResult } from "./index.ts";
 // ============================================================================
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_RETRIES = 1;
+const MAX_RETRIES = 0;
 
 export const DEFAULT_SEARCH_LIMIT = 10;
 export const MAX_SEARCH_LIMIT = 100;
@@ -28,8 +28,12 @@ let clientInstance: Firecrawl | undefined;
 /** 获取全局单例 Firecrawl 客户端 */
 export function getFirecrawlClient(): Firecrawl {
 	if (clientInstance) return clientInstance;
+	const apiKey = getFirecrawlApiKey();
+	if (!apiKey) {
+		throw new Error("Firecrawl API key not configured");
+	}
 	clientInstance = new Firecrawl({
-		apiKey: getFirecrawlApiKey(),
+		apiKey,
 		timeoutMs: DEFAULT_TIMEOUT_MS,
 		maxRetries: MAX_RETRIES,
 	});

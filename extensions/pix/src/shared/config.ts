@@ -60,7 +60,7 @@ export function loadConfig(): PixConfig {
 }
 
 // ============================================================================
-// API Key 获取（env var 优先 → 配置文件回退 → 无则抛错）
+// API Key 获取（env var 优先 → 配置文件回退 → 无则返回 undefined）
 // ============================================================================
 
 function resolveApiKey(
@@ -82,27 +82,14 @@ function resolveApiKey(
 	return undefined;
 }
 
-function requireApiKey(
-	providerKey: keyof PixConfig,
-	envVar: string,
-	label: string,
-): string {
-	const key = resolveApiKey(providerKey, envVar);
-	if (key) return key;
-	throw new Error(
-		`${label} API key not found. Set ${envVar} environment variable ` +
-			`or add '${providerKey}.apiKey' in ${getPixConfigPath()}.`,
-	);
-}
-
 /** 检查 Firecrawl API Key 是否已配置（env 或 config 文件） */
 export function hasFirecrawlApiKey(): boolean {
 	return resolveApiKey("firecrawl", "FIRECRAWL_API_KEY") !== undefined;
 }
 
-/** 获取 Firecrawl API Key（无配置时抛错） */
-export function getFirecrawlApiKey(): string {
-	return requireApiKey("firecrawl", "FIRECRAWL_API_KEY", "Firecrawl");
+/** 获取 Firecrawl API Key（未配置时返回 undefined） */
+export function getFirecrawlApiKey(): string | undefined {
+	return resolveApiKey("firecrawl", "FIRECRAWL_API_KEY");
 }
 
 /** 检查 Exa API Key 是否已配置 */
@@ -110,9 +97,9 @@ export function hasExaApiKey(): boolean {
 	return resolveApiKey("exa", "EXA_API_KEY") !== undefined;
 }
 
-/** 获取 Exa API Key（无配置时抛错） */
-export function getExaApiKey(): string {
-	return requireApiKey("exa", "EXA_API_KEY", "Exa");
+/** 获取 Exa API Key（未配置时返回 undefined） */
+export function getExaApiKey(): string | undefined {
+	return resolveApiKey("exa", "EXA_API_KEY");
 }
 
 /** 检查 Gemini API Key 是否已配置 */
@@ -120,9 +107,9 @@ export function hasGeminiApiKey(): boolean {
 	return resolveApiKey("gemini", "GEMINI_API_KEY") !== undefined;
 }
 
-/** 获取 Gemini API Key（无配置时抛错） */
-export function getGeminiApiKey(): string {
-	return requireApiKey("gemini", "GEMINI_API_KEY", "Gemini");
+/** 获取 Gemini API Key（未配置时返回 undefined） */
+export function getGeminiApiKey(): string | undefined {
+	return resolveApiKey("gemini", "GEMINI_API_KEY");
 }
 
 /** 检查 Jina API Key 是否已配置 */
@@ -130,7 +117,7 @@ export function hasJinaApiKey(): boolean {
 	return resolveApiKey("jina", "JINA_API_KEY") !== undefined;
 }
 
-/** 获取 Jina API Key */
-export function getJinaApiKey(): string {
-	return requireApiKey("jina", "JINA_API_KEY", "Jina Reader");
+/** 获取 Jina API Key（未配置时返回 undefined） */
+export function getJinaApiKey(): string | undefined {
+	return resolveApiKey("jina", "JINA_API_KEY");
 }

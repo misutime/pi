@@ -122,6 +122,9 @@ function buildQuery(params: SearchParams): string {
 
 export async function search(params: SearchParams): Promise<SearchResponse> {
 	const apiKey = getGeminiApiKey();
+	if (!apiKey) {
+		throw new Error("Gemini API key not configured");
+	}
 	const model = getModel();
 
 	const res = await fetch(`${API_BASE}/models/${model}:generateContent`, {
