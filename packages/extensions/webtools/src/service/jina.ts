@@ -2,7 +2,7 @@
  * Jina Reader fetch provider.
  *
  * 免费层：无需 API key，每分钟约 20 次。
- * 配置 JINA_API_KEY 或 pix-config.jsonc 中的 jina.apiKey 可提升速率限制。
+ * 配置 JINA_API_KEY 或 extensions.toml 中的 webtools.jina.apiKey 可提升速率限制。
  */
 
 import { getJinaApiKey } from "../config.ts";

@@ -105,7 +105,8 @@ function insertCitationMarkers(text: string, insertions: CitationInsertion[]): s
 // ============================================================================
 
 function getModel(): string {
-	return loadConfig().gemini?.searchModel?.trim() || DEFAULT_MODEL;
+	const gemini = loadConfig().gemini as { searchModel?: string } | undefined;
+	return gemini?.searchModel?.trim() || DEFAULT_MODEL;
 }
 
 /** 将 domain 过滤注入查询文本，使用 Google 的 site: / -site: 操作符 */

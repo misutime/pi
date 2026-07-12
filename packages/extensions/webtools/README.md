@@ -22,18 +22,24 @@ webtools/
 
 ## 配置
 
-配置文件路径：`~/.pi/agent/pix-config.jsonc`（支持 JSONC 注释和尾逗号）
+配置文件：`~/.pi/agent/extensions.toml`（TOML 格式，支持注释）
 
-```jsonc
-{
-  "firecrawl": { "apiKey": "fc-..." },
-  "exa": { "apiKey": "..." },
-  "gemini": {
-    "apiKey": "AIza...",
-    "searchModel": "gemini-2.5-flash"   // 可选，默认 gemini-2.5-flash
-  },
-  "jina": { "apiKey": "jina_..." }      // 可选，免费层 20/min 也够用
-}
+```toml
+# Pi 扩展配置
+# 环境变量优先级高于此文件
+
+[webtools.firecrawl]
+apiKey = "fc-..."
+
+[webtools.exa]
+apiKey = "..."
+
+[webtools.gemini]
+apiKey = "AIza..."
+# searchModel = "gemini-2.5-flash"  # 可选
+
+[webtools.jina]
+apiKey = "jina_..."  # 可选，免费层 20/min
 ```
 
 环境变量（优先级高于配置文件）：
