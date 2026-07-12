@@ -64,7 +64,11 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const promptCwd = resolvedCwd.replace(/\\/g, "/");
 
 	const now = new Date();
-	const date = now.toISOString();
+	const tzOffset = -now.getTimezoneOffset();
+	const tzSign = tzOffset >= 0 ? "+" : "-";
+	const tzH = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, "0");
+	const tzM = String(Math.abs(tzOffset) % 60).padStart(2, "0");
+	const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}${tzSign}${tzH}:${tzM}`;
 
 	const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : "";
 

@@ -111,4 +111,11 @@ describe("buildSystemPrompt", () => {
 			expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
 		});
 	});
+
+	test("includes ISO 8601 local date with timezone and OS info", () => {
+		const prompt = buildSystemPrompt({ cwd: process.cwd() });
+		expect(prompt).toMatch(/Current date: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}[+-]\d{2}:\d{2}/);
+		expect(prompt).toMatch(/Operating system: (Windows|macOS|Linux) /);
+		expect(prompt).toMatch(/Architecture: (x64|arm64)/);
+	});
 });
