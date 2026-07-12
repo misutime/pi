@@ -1,15 +1,13 @@
 /**
- * Exa service layer — search via Exa API。
+ * Exa service layer — search + contents fetch via Exa API。
  *
  * 与 firecrawl.ts 保持相同接口签名，方便 tool registration 层互换。
- *
- * 注意：Exa 是纯搜索服务，没有独立的 scrape/fetch 端点。
- * 页面内容可通过 `contents.text` 在搜索时一并获取，但 fetch() 不适用于 Exa。
  */
 
 import { Exa } from "exa-js";
 import { getExaApiKey } from "../config.ts";
 import type { SearchParams, SearchResponse } from "./firecrawl.ts";
+import type { FetchParams, FetchResult } from "./index.ts";
 
 // ============================================================================
 // Client 单例（API key 来自 pix 配置文件）
@@ -57,5 +55,36 @@ export async function search(params: SearchParams): Promise<SearchResponse> {
 			url: r.url,
 			description: r.highlights?.[0] ?? "",
 		})),
+	};
+}
+
+// ============================================================================
+// fetch() — 通过 Exa /contents 端点抓取页面内容
+// ============================================================================
+
+/**
+ * 抓取单个 URL 的完整文本内容（markdown 格式）。
+ *
+ * 使用 Exa 的 /contents API，支持 JS 渲染页面、PDF、复杂布局。
+ */
+export async function fetch(params: FetchParams): Promise<FetchResult> {
+	const exa = getExaClient();
+
+	const response = await exa.getContents([params.url], {
+		text: true,
+	});
+
+	const result = response.results[0];
+	if (!result) {
+		throw new Error(`Exa getContents returned no results for ${params.url}`);
+	}
+	if (!result.text?.trim()) {
+		throw new Error(`Exa getContents returned empty text for ${params.url}`);
+	}
+
+	return {
+		markdown: result.text,
+		title: result.title ?? undefined,
+		sourceURL: result.url,
 	};
 }

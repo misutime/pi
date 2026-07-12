@@ -2,13 +2,13 @@
  * Service router — 多 provider 回退策略。
  *
  * - search: firecrawl + exa 随机排列，gemini 固定末尾（成本最高，最后回退）
- * - fetch: firecrawl → jina → readability 顺序回退，含内容有效性校验
+ * - fetch: exa + firecrawl（随机排列，需 API key）→ jina → readability 回退
  * - 无可用 provider 或全部失败时抛错，由 agent loop 生成 isError tool result
  */
 
 import { hasFirecrawlApiKey, hasExaApiKey, hasGeminiApiKey } from "../config.ts";
 import { search as firecrawlSearch, fetch as firecrawlFetch } from "./firecrawl.ts";
-import { search as exaSearch } from "./exa.ts";
+import { search as exaSearch, fetch as exaFetch } from "./exa.ts";
 import { search as geminiSearch } from "./gemini.ts";
 import { fetch as jinaFetch } from "./jina.ts";
 import { fetch as readabilityFetch } from "./readability.ts";
@@ -95,9 +95,10 @@ export async function search(params: SearchParams): Promise<SearchResponse> {
 // Fetch（多 provider 回退链）
 // ============================================================================
 
-type FetchProvider = "firecrawl" | "jina" | "readability";
+type FetchProvider = "exa" | "firecrawl" | "jina" | "readability";
 
 const FETCH_IMPLS: Record<FetchProvider, (p: FetchParams) => Promise<FetchResult>> = {
+	exa: exaFetch,
 	firecrawl: firecrawlFetch,
 	jina: jinaFetch,
 	readability: readabilityFetch,
@@ -105,7 +106,12 @@ const FETCH_IMPLS: Record<FetchProvider, (p: FetchParams) => Promise<FetchResult
 
 function getFetchProviders(): FetchProvider[] {
 	const providers: FetchProvider[] = [];
-	if (hasFirecrawlApiKey()) providers.push("firecrawl");
+	// Exa 和 Firecrawl 随机排列均衡负载（都需要 API key）
+	const paid: FetchProvider[] = [];
+	if (hasExaApiKey()) paid.push("exa");
+	if (hasFirecrawlApiKey()) paid.push("firecrawl");
+	providers.push(...shuffle(paid));
+	// 免费/本地回退（无需 API key）
 	providers.push("jina");
 	providers.push("readability");
 	return providers;
