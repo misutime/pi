@@ -2,6 +2,7 @@
  * System prompt construction and project context loading
  */
 
+import * as os from "node:os";
 import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 
@@ -24,6 +25,29 @@ export interface BuildSystemPromptOptions {
 	skills?: Skill[];
 }
 
+/** 解析 Windows build 号为友好版本名 */
+function friendlyOS(): string {
+	const platform = os.platform();
+	const release = os.release();
+
+	if (platform === "win32") {
+		const build = Number.parseInt(release.split(".").pop() ?? "0", 10);
+		if (build >= 22000) return `Windows 11 (${release})`;
+		if (build >= 10240) return `Windows 10 (${release})`;
+		return `Windows (${release})`;
+	}
+
+	if (platform === "darwin") {
+		return `macOS ${release}`;
+	}
+
+	if (platform === "linux") {
+		return `Linux ${os.type()} ${os.release()}`;
+	}
+
+	return `${platform} ${release}`;
+}
+
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const {
@@ -40,10 +64,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const promptCwd = resolvedCwd.replace(/\\/g, "/");
 
 	const now = new Date();
-	const year = now.getFullYear();
-	const month = String(now.getMonth() + 1).padStart(2, "0");
-	const day = String(now.getDate()).padStart(2, "0");
-	const date = `${year}-${month}-${day}`;
+	const date = now.toISOString();
 
 	const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : "";
 
@@ -75,6 +96,8 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 		// Add date and working directory last
 		prompt += `\nCurrent date: ${date}`;
+		prompt += `\nOperating system: ${friendlyOS()}`;
+		prompt += `\nArchitecture: ${os.arch()}`;
 		prompt += `\nCurrent working directory: ${promptCwd}`;
 
 		return prompt;
@@ -167,6 +190,8 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 
 	// Add date and working directory last
 	prompt += `\nCurrent date: ${date}`;
+	prompt += `\nOperating system: ${friendlyOS()}`;
+	prompt += `\nArchitecture: ${os.arch()}`;
 	prompt += `\nCurrent working directory: ${promptCwd}`;
 
 	return prompt;
