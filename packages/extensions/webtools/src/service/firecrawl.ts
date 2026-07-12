@@ -6,7 +6,7 @@
  */
 
 import { Firecrawl } from "firecrawl";
-import { getFirecrawlApiKey } from "../../../shared/config.ts";
+import { getFirecrawlApiKey } from "../config.ts";
 import type { FetchParams, FetchResult } from "./index.ts";
 
 // ============================================================================

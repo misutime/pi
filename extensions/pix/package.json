@@ -6,8 +6,7 @@
   "type": "module",
   "pi": {
     "extensions": [
-      "./src/tools/subagents/index.ts",
-      "./src/tools/webtools/index.ts"
+      "./src/tools/subagents/index.ts"
     ]
   },
   "scripts": {
@@ -15,17 +14,9 @@
     "build": "echo 'nothing to build'",
     "test": "vitest --run"
   },
-  "dependencies": {
-    "@mozilla/readability": "0.5.0",
-    "exa-js": "2.16.0",
-    "firecrawl": "4.30.0",
-    "jsonc-parser": "3.3.1",
-    "linkedom": "0.18.9",
-    "turndown": "7.2.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "26.1.1",
-    "@types/turndown": "5.0.5",
     "typescript": "5.9.3",
     "vitest": "4.1.9"
   },

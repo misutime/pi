@@ -7,7 +7,7 @@
  * results 按对应编号排列，LLM 可直接根据引用编号调用 webfetch。
  */
 
-import { getGeminiApiKey, loadConfig } from "../../../shared/config.ts";
+import { getGeminiApiKey, loadConfig } from "../config.ts";
 import type { SearchParams, SearchResponse } from "./firecrawl.ts";
 
 // ============================================================================

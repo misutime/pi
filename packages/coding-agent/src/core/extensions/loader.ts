@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as _bundledPiAgentCore from "@earendil-works/pi-agent-core";
 import * as _bundledPiAiCompat from "@earendil-works/pi-ai/compat";
 import * as _bundledPiAiOauth from "@earendil-works/pi-ai/oauth";
@@ -19,7 +19,7 @@ import { createJiti } from "jiti/static";
 import * as _bundledTypebox from "typebox";
 import * as _bundledTypeboxCompile from "typebox/compile";
 import * as _bundledTypeboxValue from "typebox/value";
-import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.ts";
+import { CONFIG_DIR_NAME, getAgentDir, getPackageDir, IS_DEV, isBunBinary } from "../../config.ts";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
 // avoiding a circular dependency. Extensions can import from @earendil-works/pi-coding-agent.
 import * as _bundledPiCodingAgent from "../../index.ts";
@@ -696,4 +696,61 @@ export async function discoverAndLoadExtensions(
 	}
 
 	return loadExtensions(allPaths, resolvedCwd, eventBus);
+}
+
+/**
+ * 加载内置扩展：扫描 packages/extensions/（dev）或 extensions/（release）目录。
+ * 每个子目录就是一个内置扩展，只需包含 package.json + 入口文件，无需额外注册。
+ */
+export async function loadBuiltinExtensions(
+	cwd: string,
+	eventBus: EventBus,
+	runtime: ExtensionRuntime,
+): Promise<{ extensions: Extension[]; errors: LoadExtensionsResult["errors"] }> {
+	const pkgDir = getPackageDir();
+	const extensions: Extension[] = [];
+	const errors: LoadExtensionsResult["errors"] = [];
+
+	// 发现内置扩展：dev 扫源码目录，release 扫构建产物目录
+	const scanDir = IS_DEV ? path.resolve(pkgDir, "..", "extensions") : path.join(pkgDir, "extensions");
+
+	let names: string[] = [];
+	try {
+		names = fs
+			.readdirSync(scanDir, { withFileTypes: true })
+			.filter((d) => d.isDirectory())
+			.map((d) => d.name);
+	} catch {
+		return { extensions, errors };
+	}
+
+	for (const name of names) {
+		try {
+			let resolved: string;
+
+			if (IS_DEV) {
+				resolved = path.join(scanDir, name, "src", "index.ts");
+				if (!fs.existsSync(resolved)) continue;
+			} else {
+				const extDir = path.join(scanDir, name);
+				const manifestRaw = fs.readFileSync(path.join(extDir, "package.json"), "utf-8");
+				const manifest = JSON.parse(manifestRaw);
+				const entryPaths: string[] = manifest.pi?.extensions ?? [];
+				resolved = path.resolve(extDir, entryPaths[0] ?? "index.js");
+			}
+
+			// NOTE: 此处 await import() 是内置扩展目录扫描的架构例外——
+			// 扩展名称运行时才能确定，无法在编译期静态 import。
+			const mod = await import(pathToFileURL(resolved).href);
+			const factory = mod.default as ExtensionFactory;
+			const ext = await loadExtensionFromFactory(factory, cwd, eventBus, runtime, `<builtin:${name}>`);
+			extensions.push(ext);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			errors.push({ path: name, error: msg });
+			eventBus?.emit("extension_load_error", { path: name, error: msg });
+		}
+	}
+
+	return { extensions, errors };
 }

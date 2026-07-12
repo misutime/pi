@@ -6,7 +6,7 @@
  * - 无可用 provider 或全部失败时抛错，由 agent loop 生成 isError tool result
  */
 
-import { hasFirecrawlApiKey, hasExaApiKey, hasGeminiApiKey } from "../../../shared/config.ts";
+import { hasFirecrawlApiKey, hasExaApiKey, hasGeminiApiKey } from "../config.ts";
 import { search as firecrawlSearch, fetch as firecrawlFetch } from "./firecrawl.ts";
 import { search as exaSearch } from "./exa.ts";
 import { search as geminiSearch } from "./gemini.ts";

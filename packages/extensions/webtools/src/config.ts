@@ -8,7 +8,7 @@ import type { ParseError } from "jsonc-parser";
 // Config 类型
 // ============================================================================
 
-interface PixConfig {
+interface WebtoolsConfig {
 	firecrawl?: { apiKey?: string };
 	exa?: { apiKey?: string };
 	gemini?: { apiKey?: string; searchModel?: string };
@@ -19,28 +19,27 @@ interface PixConfig {
 // 路径
 // ============================================================================
 
-/** pi agent 目录下的 pix 配置路径，与 pi core 共享同一配置目录体系 */
-export function getPixConfigPath(): string {
-	return join(getAgentDir(), "pix-config.jsonc");
+function getConfigPath(): string {
+	return join(getAgentDir(), "webtools-config.jsonc");
 }
 
 // ============================================================================
 // 全局加载（懒 + 缓存）
 // ============================================================================
 
-let cachedConfig: PixConfig | undefined;
+let cachedConfig: WebtoolsConfig | undefined;
 
-export function loadConfig(): PixConfig {
+export function loadConfig(): WebtoolsConfig {
 	if (cachedConfig !== undefined) return cachedConfig;
 
-	const configPath = getPixConfigPath();
+	const configPath = getConfigPath();
 	if (!existsSync(configPath)) {
 		cachedConfig = {};
 		return cachedConfig;
 	}
 	const raw = readFileSync(configPath, "utf-8");
 	const errors: ParseError[] = [];
-	const result = parse(raw, errors) as PixConfig;
+	const result = parse(raw, errors) as WebtoolsConfig;
 
 	// jsonc-parser 遇到尾逗号等 JSONC 特性会记录非致命错误但依然成功解析。
 	// 去掉注释后，再移除尾逗号（JSONC 合法但标准 JSON 不合法），
@@ -64,7 +63,7 @@ export function loadConfig(): PixConfig {
 // ============================================================================
 
 function resolveApiKey(
-	providerKey: keyof PixConfig,
+	providerKey: keyof WebtoolsConfig,
 	envVar: string,
 ): string | undefined {
 	// 1. 环境变量（最高优先级）

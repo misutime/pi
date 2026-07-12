@@ -4,6 +4,7 @@
 	"type": "module",
 	"workspaces": [
 		"packages/*",
+		"packages/extensions/*",
 		"extensions/*",
 		"packages/coding-agent/examples/extensions/with-deps",
 		"packages/coding-agent/examples/extensions/custom-provider-anthropic",

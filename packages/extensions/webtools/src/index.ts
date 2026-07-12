@@ -3,10 +3,9 @@ import webfetch from "./fetch.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /**
- * webtools — websearch + webfetch 统一入口。
+ * webtools — websearch + webfetch，pi 内置扩展。
  *
- * 只需在 pix-config.jsonc 中配置至少一个 provider 的 API key，
- * pi 加载此文件后两个工具均可用。
+ * 在 webtools-config.jsonc 或环境变量中配置至少一个 provider 的 API key 即可使用。
  */
 export default function webtools(pi: ExtensionAPI): void {
 	websearch(pi);

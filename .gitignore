@@ -41,3 +41,6 @@ todo.md
 collect.sh
 
 .codegraph
+
+# Built-in extensions build artifacts
+packages/coding-agent/extensions/

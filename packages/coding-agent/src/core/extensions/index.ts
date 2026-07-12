@@ -7,6 +7,7 @@ export type { SourceInfo } from "../source-info.ts";
 export {
 	createExtensionRuntime,
 	discoverAndLoadExtensions,
+	loadBuiltinExtensions,
 	loadExtensionFromFactory,
 	loadExtensions,
 } from "./loader.ts";

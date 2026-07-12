@@ -8,7 +8,7 @@
  */
 
 import { Exa } from "exa-js";
-import { getExaApiKey } from "../../../shared/config.ts";
+import { getExaApiKey } from "../config.ts";
 import type { SearchParams, SearchResponse } from "./firecrawl.ts";
 
 // ============================================================================

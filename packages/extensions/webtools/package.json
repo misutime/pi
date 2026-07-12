@@ -1,0 +1,24 @@
+{
+  "name": "@pi/webtools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../../../scripts/build-extension.mjs",
+    "clean": "echo 'nothing to clean'"
+  },
+  "dependencies": {
+    "@mozilla/readability": "0.5.0",
+    "exa-js": "2.16.0",
+    "firecrawl": "4.30.0",
+    "jsonc-parser": "3.3.1",
+    "linkedom": "0.18.9",
+    "turndown": "7.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "@types/turndown": "5.0.5",
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3"
+  }
+}

@@ -12,6 +12,7 @@ import { createEventBus, type EventBus } from "./event-bus.ts";
 import {
 	clearExtensionCache,
 	createExtensionRuntime,
+	loadBuiltinExtensions,
 	loadExtensionFromFactory,
 	loadExtensionsCached,
 } from "./extensions/loader.ts";
@@ -500,6 +501,14 @@ export class DefaultResourceLoader implements ResourceLoader {
 			? cliEnabledExtensions
 			: this.mergePaths(cliEnabledExtensions, enabledExtensions);
 		const extensionsResult = await loadExtensionsCached(extensionPaths, this.cwd, this.eventBus);
+
+		// 内置扩展：--no-extensions 时也跳过
+		if (!this.noExtensions) {
+			const builtins = await loadBuiltinExtensions(this.cwd, this.eventBus, extensionsResult.runtime);
+			extensionsResult.extensions.unshift(...builtins.extensions);
+			extensionsResult.errors.push(...builtins.errors);
+		}
+
 		if (!options.includeInlineFactories) {
 			return extensionsResult;
 		}
@@ -520,6 +529,11 @@ export class DefaultResourceLoader implements ResourceLoader {
 	): Promise<LoadExtensionsResult> {
 		if (!preTrustExtensions) {
 			const extensionsResult = await loadExtensionsCached(extensionPaths, this.cwd, this.eventBus);
+			if (!this.noExtensions) {
+				const builtins = await loadBuiltinExtensions(this.cwd, this.eventBus, extensionsResult.runtime);
+				extensionsResult.extensions.unshift(...builtins.extensions);
+				extensionsResult.errors.push(...builtins.errors);
+			}
 			const inlineExtensions = await this.loadExtensionFactories(extensionsResult.runtime);
 			extensionsResult.extensions.push(...inlineExtensions.extensions);
 			extensionsResult.errors.push(...inlineExtensions.errors);
@@ -553,9 +567,13 @@ export class DefaultResourceLoader implements ResourceLoader {
 		const inlineExtensions = preTrustExtensions.extensions.filter((extension) =>
 			extension.path.startsWith("<inline:"),
 		);
+		const builtinExtensions = preTrustExtensions.extensions.filter((extension) =>
+			extension.path.startsWith("<builtin:"),
+		);
 		const orderedExtensions = extensionPaths
 			.map((path) => loadedByPath.get(this.resolveExtensionLoadPath(path)))
 			.filter((extension): extension is Extension => extension !== undefined);
+		orderedExtensions.unshift(...builtinExtensions);
 		orderedExtensions.push(...inlineExtensions);
 
 		const extensionsResult: LoadExtensionsResult = {

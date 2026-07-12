@@ -5,7 +5,7 @@
  * 配置 JINA_API_KEY 或 pix-config.jsonc 中的 jina.apiKey 可提升速率限制。
  */
 
-import { getJinaApiKey } from "../../../shared/config.ts";
+import { getJinaApiKey } from "../config.ts";
 import type { FetchParams, FetchResult } from "./index.ts";
 
 const JINA_BASE = "https://r.jina.ai/";
