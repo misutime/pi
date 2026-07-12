@@ -11,9 +11,8 @@
 
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { tryGh, restApi, checkGhAvailable } from "./client.ts";
+import { tryGh, restApi } from "./client.ts";
 import { inferRepoFromCwd } from "./git-remote.ts";
-import type { GitHubRepo } from "./params.ts";
 
 // ============================================================================
 // 类型
@@ -72,8 +71,9 @@ function parseRepoUrl(url: string): { owner: string; repo: string; ref?: string;
 
 	if (parts.length >= 3 && (parts[2] === "blob" || parts[2] === "tree")) {
 		result.type = parts[2];
-		if (parts.length >= 4) result.ref = parts[3];
-		if (parts.length >= 5) result.path = parts.slice(4).join("/");
+		// 取所有剩余段作为 path（不区分 ref/path，branch 名可能含 /）。
+		// ref 总是通过 fetchDefaultBranch 解析。
+		if (parts.length >= 4) result.path = parts.slice(3).join("/");
 	}
 
 	return result;
@@ -271,6 +271,51 @@ function truncate(text: string, maxLen: number, label: string): string {
 // 核心逻辑
 // ============================================================================
 
+/** 自动检测路径类型（文件/目录）并格式化输出 */
+function formatPathContent(path: string, content: GhContent | GhContent[] | null): string {
+	const lines: string[] = [];
+
+	if (!content) {
+		lines.push(`路径 \`${path}\` 不存在或无法读取。`);
+		return lines.join("\n");
+	}
+
+	// 目录
+	if (Array.isArray(content)) {
+		lines.push(`## \`${path}/\``);
+		lines.push("");
+		lines.push(formatDirListing(content));
+		return lines.join("\n");
+	}
+
+	// 文件
+	if (content.type === "file" || content.type === "symlink") {
+		const isBinary = !content.content;
+		if (isBinary) {
+			lines.push(`## \`${path}\``);
+			const size = content.size != null ? `，${formatSize(content.size)}` : "";
+			lines.push(`（二进制文件${size}）`);
+			return lines.join("\n");
+		}
+
+		try {
+			const decoded = content.encoding === "base64"
+				? Buffer.from(content.content!, "base64").toString("utf-8")
+				: content.content!;
+			lines.push(`## \`${path}\``);
+			lines.push("");
+			lines.push(truncate(decoded, MAX_FILE_CHARS, "文件"));
+		} catch {
+			lines.push(`## \`${path}\``);
+			lines.push("（文件内容无法解码）");
+		}
+		return lines.join("\n");
+	}
+
+	lines.push(`路径 \`${path}\` 的类型未知。`);
+	return lines.join("\n");
+}
+
 async function buildRepoView(
 	owner: string,
 	repo: string,
@@ -304,17 +349,23 @@ async function buildRepoView(
 	}
 
 	// ---- 目录视图 ----
-	if (subType === "tree" || (subPath && subType === undefined)) {
-		const dirPath = subPath || "";
+	if (subType === "tree" && subPath) {
+		const dirPath = subPath;
 		const content = await fetchContent(owner, repo, dirPath, ref, signal);
 		if (Array.isArray(content)) {
-			lines.push(`## \`${dirPath || "/"}\``);
+			lines.push(`## \`${dirPath}/\``);
 			lines.push("");
 			lines.push(formatDirListing(content));
 		} else {
-			lines.push(`路径 \`${dirPath}\` 不存在。`);
+			lines.push(`路径 \`${dirPath}\` 不存在或不是目录。`);
 		}
 		return lines.join("\n");
+	}
+
+	// ---- 路径视图（subType 未知时自动检测文件/目录）----
+	if (subPath && subType === undefined) {
+		const content = await fetchContent(owner, repo, subPath, ref, signal);
+		return formatPathContent(subPath, content);
 	}
 
 	// ---- 仓库首页视图 ----
@@ -409,7 +460,8 @@ export default function githubRepoView(pi: ExtensionAPI): void {
 		description:
 			"查看 GitHub 仓库结构、README 和文件内容。" +
 			" 可用于快速了解项目架构、查看目录树、或读取特定文件。" +
-			" 支持完整 URL、owner/repo 格式、或自动推断当前工作目录的 git 仓库。",
+			" 支持完整 URL、owner/repo 格式、或自动推断当前工作目录的 git 仓库。" +
+			" 注：始终读取默认分支内容；如需指定分支/标签/commit，请使用 repo+path 模式后追加 ref 参数（暂未开放）。",
 		promptSnippet: "Use to explore a GitHub repository's structure, README, and file contents.",
 		parameters: Type.Object({
 			url: Type.Optional(
