@@ -47,6 +47,22 @@ function buildSearchQuery(params: {
 // 数据获取
 // ============================================================================
 
+/** 将 gh 或 REST 返回的原始结果规范化为统一 CodeResult */
+function normalizeCodeResult(item: Record<string, unknown>): CodeResult {
+	const repo = (item.repository as Record<string, unknown> | null) ?? {};
+	// gh: nameWithOwner, REST: full_name
+	const fullName = String(
+		repo.nameWithOwner ?? repo.full_name ?? "",
+	);
+	// gh: url (same field), REST: html_url
+	const url = String(item.url ?? item.html_url ?? "");
+	return {
+		repository: { fullName },
+		path: String(item.path ?? ""),
+		url,
+	};
+}
+
 async function fetchCodeSearch(
 	query: string,
 	limit: number,
@@ -60,11 +76,11 @@ async function fetchCodeSearch(
 	], signal);
 
 	if (ghJson !== null) {
-		const results: CodeResult[] = JSON.parse(ghJson);
-		return results;
+		const raw = JSON.parse(ghJson) as Array<Record<string, unknown>>;
+		return raw.map(normalizeCodeResult);
 	}
 
-	// 2. REST fallback — 字段需规范化：full_name → fullName, html_url → url
+	// 2. REST fallback
 	try {
 		const enc = encodeURIComponent(query);
 		const text = await restApi(
@@ -72,11 +88,7 @@ async function fetchCodeSearch(
 			{ signal },
 		);
 		const data = JSON.parse(text) as { items: Array<Record<string, unknown>> };
-		return (data.items ?? []).map((item): CodeResult => ({
-			repository: { fullName: String((item.repository as Record<string, unknown> | null)?.full_name ?? "") },
-			path: String(item.path ?? ""),
-			url: String(item.html_url ?? ""),
-		}));
+		return (data.items ?? []).map(normalizeCodeResult);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		throw new Error(
