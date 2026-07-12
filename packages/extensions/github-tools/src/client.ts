@@ -4,7 +4,7 @@
  * 认证：
  *   1. gh CLI 已登录（gh auth status）
  *   2. GITHUB_TOKEN 环境变量
- *   3. extensions.toml [repo-tools].githubToken
+ *   3. extensions.toml [github-tools].githubToken
  */
 
 import { execFile } from "node:child_process";
@@ -78,9 +78,9 @@ export function getGitHubToken(): string | undefined {
 	const env = process.env["GITHUB_TOKEN"]?.trim();
 	if (env) return env;
 
-	// 2. extensions.toml [repo-tools].githubToken
+	// 2. extensions.toml [github-tools].githubToken
 	try {
-		const config = loadExtensionConfig("repo-tools");
+		const config = loadExtensionConfig("github-tools");
 		const token = (config as Record<string, unknown>).githubToken;
 		if (typeof token === "string" && token.trim()) return token.trim();
 	} catch {
@@ -100,7 +100,7 @@ export async function restApi(
 ): Promise<string> {
 	const token = getGitHubToken();
 	const headers: Record<string, string> = {
-		"User-Agent": "pi-repo-tools",
+		"User-Agent": "pi-github-tools",
 		"Accept": opts?.accept ?? "application/vnd.github+json",
 	};
 	if (token) headers["Authorization"] = `Bearer ${token}`;

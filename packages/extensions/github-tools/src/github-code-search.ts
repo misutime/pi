@@ -146,13 +146,13 @@ const MAX_LIMIT = 20;
 const AUTH_REQUIRED_HELP =
 	"GitHub 代码搜索需要认证，匿名访问不被 GitHub 支持。\n\n" +
 	"请选择以下任一方式：\n\n" +
-	"1. 安装 GitHub CLI 并登录（推荐，同时解锁所有 repo-tools 功能）：\n" +
+	"1. 安装 GitHub CLI 并登录（推荐，同时解锁所有 github-tools 功能）：\n" +
 	"   https://cli.github.com/\n" +
 	"   然后运行：gh auth login\n\n" +
 	"2. 设置 GITHUB_TOKEN 环境变量：\n" +
 	"   GITHUB_TOKEN=ghp_xxxxx\n\n" +
 	"3. 在 extensions.toml 中配置 token：\n" +
-	"   [repo-tools]\n" +
+	"   [github-tools]\n" +
 	"   githubToken = \"ghp_xxxxx\"\n\n" +
 	"Token 需在 https://github.com/settings/tokens 创建（不需要任何权限 scope）。";
 

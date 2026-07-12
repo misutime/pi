@@ -1,4 +1,4 @@
-# repo-tools
+# github-tools
 
 GitHub 仓库能力扩展 — 结构化读取 GitHub 仓库、issue、PR 和代码搜索。
 
@@ -65,7 +65,7 @@ Token 在 https://github.com/settings/tokens 创建，**不需要勾选任何权
 在 `~/.pi/agent/extensions.toml` 中配置：
 
 ```toml
-[repo-tools]
+[github-tools]
 githubToken = "ghp_xxxxx"
 ```
 
