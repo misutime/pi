@@ -6,7 +6,7 @@
 
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { tryGh, restApi } from "./client.ts";
+import { tryGh, restApi, checkGhAvailable, getGitHubToken } from "./client.ts";
 
 // ============================================================================
 // 类型
@@ -65,17 +65,26 @@ async function fetchCodeSearch(
 	}
 
 	// 2. REST fallback — 字段需规范化：full_name → fullName, html_url → url
-	const enc = encodeURIComponent(query);
-	const text = await restApi(
-		`/search/code?q=${enc}&per_page=${Math.min(limit, 100)}`,
-		{ signal },
-	);
-	const data = JSON.parse(text) as { items: Array<Record<string, unknown>> };
-	return (data.items ?? []).map((item): CodeResult => ({
-		repository: { fullName: String((item.repository as Record<string, unknown> | null)?.full_name ?? "") },
-		path: String(item.path ?? ""),
-		url: String(item.html_url ?? ""),
-	}));
+	try {
+		const enc = encodeURIComponent(query);
+		const text = await restApi(
+			`/search/code?q=${enc}&per_page=${Math.min(limit, 100)}`,
+			{ signal },
+		);
+		const data = JSON.parse(text) as { items: Array<Record<string, unknown>> };
+		return (data.items ?? []).map((item): CodeResult => ({
+			repository: { fullName: String((item.repository as Record<string, unknown> | null)?.full_name ?? "") },
+			path: String(item.path ?? ""),
+			url: String(item.html_url ?? ""),
+		}));
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		throw new Error(
+			`GitHub code search 失败。请确认 gh CLI 已登录（gh auth login）或 token 有效。` +
+			`
+技术细节: ${msg}`,
+		);
+	}
 }
 
 // ============================================================================
@@ -122,13 +131,27 @@ function formatResults(
 
 const MAX_LIMIT = 20;
 
+const AUTH_REQUIRED_HELP =
+	"GitHub 代码搜索需要认证，匿名访问不被 GitHub 支持。\n\n" +
+	"请选择以下任一方式：\n\n" +
+	"1. 安装 GitHub CLI 并登录（推荐，同时解锁所有 repo-tools 功能）：\n" +
+	"   https://cli.github.com/\n" +
+	"   然后运行：gh auth login\n\n" +
+	"2. 设置 GITHUB_TOKEN 环境变量：\n" +
+	"   GITHUB_TOKEN=ghp_xxxxx\n\n" +
+	"3. 在 extensions.toml 中配置 token：\n" +
+	"   [repo-tools]\n" +
+	"   githubToken = \"ghp_xxxxx\"\n\n" +
+	"Token 需在 https://github.com/settings/tokens 创建（不需要任何权限 scope）。";
+
 export default function githubCodeSearch(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "github_code_search",
 		label: "GitHub Code Search",
 		description:
-			"跨仓库搜索公开 GitHub 代码。支持按语言、仓库、路径过滤。" +
+			"跨仓库搜索 GitHub 代码。支持按语言、仓库、路径过滤。" +
 			" 用于查找 API 用法、实现模式、配置示例等。" +
+			" 需要 GitHub 认证（gh auth login 或 token）；不支持匿名搜索。" +
 			" 注：GitHub code search 是 legacy engine，不支持正则。",
 		parameters: Type.Object({
 			query: Type.String({ description: "搜索查询（支持 GitHub search syntax）" }),
@@ -156,6 +179,16 @@ export default function githubCodeSearch(pi: ExtensionAPI): void {
 			params,
 			signal,
 		): Promise<AgentToolResult<Record<string, unknown>>> => {
+			// 认证检查 — GitHub code search 不支持匿名访问
+			const hasGh = await checkGhAvailable();
+			const hasToken = getGitHubToken() !== undefined;
+			if (!hasGh && !hasToken) {
+				return {
+					content: [{ type: "text", text: AUTH_REQUIRED_HELP }],
+					details: { error: "auth_required" },
+				};
+			}
+
 			const query = buildSearchQuery({
 				query: params.query as string,
 				language: params.language as string | undefined,
