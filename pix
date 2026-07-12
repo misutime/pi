@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# pix — 从任意目录启动 pi 开发模式
+# 用法: pix [pi 参数...]
+#       将 repo 根目录加入 PATH 即可在任意目录使用
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TSX_BIN="$SCRIPT_DIR/node_modules/.bin/tsx"
+
+if [[ ! -x "$TSX_BIN" ]]; then
+	echo "tsx not found. Run 'npm install' from $SCRIPT_DIR first." >&2
+	exit 1
+fi
+
+cd "$SCRIPT_DIR"
+exec "$TSX_BIN" --tsconfig "$SCRIPT_DIR/tsconfig.json" "$SCRIPT_DIR/packages/coding-agent/src/cli.ts" "$@"
