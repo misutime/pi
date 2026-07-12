@@ -51,7 +51,17 @@ const NOISE_DIRS = new Set([
 // URL 解析
 // ============================================================================
 
-function parseRepoUrl(url: string): { owner: string; repo: string; ref?: string; path?: string; type?: "blob" | "tree" } | null {
+// 非代码路径段（issue/PR/讨论/wiki 等），解析到后提示用户用对应工具
+const NON_CODE_SEGMENTS = new Set([
+	"issues", "pull", "pulls", "discussions", "releases", "wiki",
+	"actions", "settings", "security", "projects", "graphs",
+	"compare", "commits", "tags", "branches", "stargazers",
+	"watchers", "network", "forks", "milestone", "labels",
+	"packages", "codespaces", "contribute", "community",
+	"sponsors", "invitations", "notifications", "insights",
+]);
+
+function parseRepoUrl(url: string): { owner: string; repo: string; ref?: string; path?: string; type?: "blob" | "tree" } | "non_code" | null {
 	let u: URL;
 	try {
 		u = new URL(url);
@@ -61,8 +71,17 @@ function parseRepoUrl(url: string): { owner: string; repo: string; ref?: string;
 
 	if (u.hostname !== "github.com" && u.hostname !== "www.github.com") return null;
 
-	const parts = u.pathname.split("/").filter(Boolean);
+	const parts = u.pathname.split("/").filter(Boolean).map((segment) => {
+		try {
+			return decodeURIComponent(segment);
+		} catch {
+			return segment;
+		}
+	});
 	if (parts.length < 2) return null;
+
+	// 检测非代码路径，提示用户用对应工具
+	if (NON_CODE_SEGMENTS.has(parts[2]?.toLowerCase())) return "non_code";
 
 	const result: { owner: string; repo: string; ref?: string; path?: string; type?: "blob" | "tree" } = {
 		owner: parts[0],
@@ -405,6 +424,16 @@ async function resolveRepo(params: {
 	// 1. 完整 URL
 	if (params.url) {
 		const parsed = parseRepoUrl(params.url);
+		if (parsed === "non_code") {
+			const pathParts = new URL(params.url!).pathname.split("/").filter(Boolean);
+			const segment = pathParts[2] ?? "?";
+			const hint = segment === "issues" || segment === "pull" || segment === "pulls" ?
+				"请使用 github_issue_view 或 github_pr_view 查看。" :
+				"这不是代码仓库页面，github_repo_view 不支持此 URL 类型。";
+			throw new Error(
+				`此 URL 指向 GitHub ${segment} 页面，不是代码仓库页面。${hint}`,
+			);
+		}
 		if (!parsed) {
 			throw new Error(
 				`无效的 GitHub URL: ${params.url}。需要 https://github.com/owner/repo 格式。`,
