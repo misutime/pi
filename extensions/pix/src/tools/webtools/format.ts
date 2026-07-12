@@ -44,7 +44,7 @@ export function applyTruncation(content: string, label: string): string {
  *
  * - 语义：abort signal 触发时拒绝 Promise，调用方立即退出
  * - 限制：底层 SDK（Firecrawl/Exa）不支持 AbortSignal，远端请求可能仍在执行
- * - 实际保护：provider 自身的 timeout（如 Firecrawl 30s + 1 retry）比此 race 更可靠
+ * - 实际保护：provider 自身的 timeout（如 Firecrawl 30s）比此 race 更可靠
  * - 使用场景：用户按 Esc 中断 / subagent 被父 session 取消 / 网络卡住时避免长时间挂起
  */
 export function raceWithAbort<T>(

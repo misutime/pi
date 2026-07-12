@@ -89,7 +89,7 @@ webtools/
 |---|---|---|---|
 | **search** | REST API（SDK） | REST API（SDK） | Gemini generateContent + google_search tool |
 | **结果数量** | limit 参数 | numResults 参数 | 由 Gemini 决定（通常 5-10 条） |
-| **超时** | 30s + 1 retry | 无显式超时（SDK 内置） | 60s（Gemini API） |
+| **超时** | 30s | 无显式超时（SDK 内置） | 60s（Gemini API） |
 | **模型** | — | — | `gemini-2.5-flash`（可配 `searchModel`） |
 
 ## Search Provider 选择与回退

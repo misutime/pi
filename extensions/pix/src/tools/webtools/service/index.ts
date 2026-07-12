@@ -3,7 +3,7 @@
  *
  * - search: firecrawl + exa 随机排列，gemini 固定末尾（成本最高，最后回退）
  * - fetch: firecrawl → jina → readability 顺序回退，含内容有效性校验
- * - 无可用 provider 或全部失败时返回提示信息，不抛错
+ * - 无可用 provider 或全部失败时抛错，由 agent loop 生成 isError tool result
  */
 
 import { hasFirecrawlApiKey, hasExaApiKey, hasGeminiApiKey } from "../../../shared/config.ts";
@@ -69,10 +69,10 @@ export async function search(params: SearchParams): Promise<SearchResponse> {
 	const providers = getSearchProviders();
 
 	if (providers.length === 0) {
-		return {
-			results: [],
-			answer: "Web search is not available because no search provider is configured. Tell the user to configure at least one search API key (Firecrawl, Exa, or Gemini).",
-		};
+		throw new Error(
+			"Web search is not available because no search provider is configured. " +
+				"Tell the user to configure at least one search API key (Firecrawl, Exa, or Gemini).",
+		);
 	}
 
 	const errors: string[] = [];
@@ -86,10 +86,9 @@ export async function search(params: SearchParams): Promise<SearchResponse> {
 		}
 	}
 
-	return {
-		results: [],
-		answer: `All search providers failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
-	};
+	throw new Error(
+		`All search providers failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
+	);
 }
 
 // ============================================================================
@@ -120,10 +119,7 @@ export async function fetch(params: FetchParams, signal?: AbortSignal): Promise<
 	for (const provider of providers) {
 		// Abort 检查 — 用户取消了就不再继续
 		if (signal?.aborted) {
-			return {
-				markdown: `Fetch aborted: ${signal.reason ?? "Aborted"}`,
-				sourceURL: params.url,
-			};
+			throw new Error(signal.reason ?? "Aborted");
 		}
 
 		try {
@@ -141,8 +137,5 @@ export async function fetch(params: FetchParams, signal?: AbortSignal): Promise<
 		}
 	}
 
-	return {
-		markdown: "Failed to fetch the URL. All content providers returned errors.",
-		sourceURL: params.url,
-	};
+	throw new Error("Failed to fetch the URL. All content providers returned errors.");
 }
