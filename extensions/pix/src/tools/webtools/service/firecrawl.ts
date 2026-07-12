@@ -1,13 +1,13 @@
 /**
  * Firecrawl service layer — search 和 fetch 的 SDK 封装。
  *
- * 架构约定：search.ts / fetch.ts 只做工具注册和参数校验，具体功能委托给 service。
- * 未来支持 Exa、Gemini Search 等时，新增 service/exa.ts 保持相同函数签名即可。
+ * FetchParams / FetchResult 类型由 service/index.ts 定义。
+ * 本文件导出 search() 和 fetch() 供路由层调用。
  */
 
 import { Firecrawl } from "firecrawl";
-import type { ScrapeOptions } from "firecrawl";
 import { getFirecrawlApiKey } from "../../../shared/config.ts";
+import type { FetchParams, FetchResult } from "./index.ts";
 
 // ============================================================================
 // 常量
@@ -108,33 +108,17 @@ export async function search(params: SearchParams): Promise<SearchResponse> {
 // fetch()
 // ============================================================================
 
-export interface FetchParams {
-	url: string;
-	onlyMainContent?: boolean;
-	waitFor?: number;
-}
-
-export interface FetchResult {
-	markdown: string;
-	title?: string;
-	sourceURL?: string;
-	statusCode?: number;
-	description?: string;
-}
-
 /**
  * 抓取单个 URL 并返回 markdown 内容。
+ * onlyMainContent 固定为 true（"只提取主内容"是全局策略）。
  */
 export async function fetch(params: FetchParams): Promise<FetchResult> {
 	const firecrawl = getFirecrawlClient();
 
-	const options: ScrapeOptions = {
+	const doc = await firecrawl.scrape(params.url, {
 		formats: ["markdown"],
-		onlyMainContent: params.onlyMainContent ?? true,
-	};
-	if (params.waitFor !== undefined) options.waitFor = params.waitFor;
-
-	const doc = await firecrawl.scrape(params.url, options);
+		onlyMainContent: true,
+	});
 	const meta = doc.metadata;
 
 	return {
@@ -142,6 +126,5 @@ export async function fetch(params: FetchParams): Promise<FetchResult> {
 		title: meta?.title,
 		sourceURL: meta?.sourceURL,
 		statusCode: meta?.statusCode,
-		description: meta?.description,
 	};
 }

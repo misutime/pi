@@ -12,6 +12,7 @@ interface PixConfig {
 	firecrawl?: { apiKey?: string };
 	exa?: { apiKey?: string };
 	gemini?: { apiKey?: string; searchModel?: string };
+	jina?: { apiKey?: string };
 }
 
 // ============================================================================
@@ -122,4 +123,14 @@ export function hasGeminiApiKey(): boolean {
 /** 获取 Gemini API Key（无配置时抛错） */
 export function getGeminiApiKey(): string {
 	return requireApiKey("gemini", "GEMINI_API_KEY", "Gemini");
+}
+
+/** 检查 Jina API Key 是否已配置 */
+export function hasJinaApiKey(): boolean {
+	return resolveApiKey("jina", "JINA_API_KEY") !== undefined;
+}
+
+/** 获取 Jina API Key */
+export function getJinaApiKey(): string {
+	return requireApiKey("jina", "JINA_API_KEY", "Jina Reader");
 }

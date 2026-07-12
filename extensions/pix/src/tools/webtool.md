@@ -13,7 +13,9 @@ webtools/
     ├── index.ts           # 路由层：shuffle + 顺序回退
     ├── firecrawl.ts       # Firecrawl SDK（search + fetch）
     ├── exa.ts             # Exa SDK（search only）
-    └── gemini.ts          # Gemini API google_search grounding（search only）
+    ├── gemini.ts          # Gemini API（search only）
+    ├── jina.ts            # Jina Reader（fetch only）
+    └── readability.ts     # 本地 Readability + Turndown（fetch only）
 ```
 
 **原则**：`search.ts` / `fetch.ts` 只管工具注册和参数校验，业务逻辑委托给 service 层。新增 provider 只需加一个 `service/xxx.ts` 并在 `index.ts` 注册。
@@ -29,7 +31,8 @@ webtools/
   "gemini": {
     "apiKey": "AIza...",
     "searchModel": "gemini-2.5-flash"   // 可选，默认 gemini-2.5-flash
-  }
+  },
+  "jina": { "apiKey": "jina_..." }      // 可选，免费层 20/min 也够用
 }
 ```
 
@@ -40,6 +43,7 @@ webtools/
 | `FIRECRAWL_API_KEY` | Firecrawl |
 | `EXA_API_KEY` | Exa |
 | `GEMINI_API_KEY` | Gemini |
+| `JINA_API_KEY` | Jina Reader（可选，免费层也够用） |
 
 ## 工具
 
@@ -60,29 +64,35 @@ webtools/
 
 ### webfetch
 
-抓取单个 URL 并返回 markdown 内容。支持 JavaScript 渲染页面、PDF 等。
+抓取单个 URL 并返回 markdown 内容。多 provider 顺序回退（Firecrawl → Jina Reader → 本地 Readability），零配置也能用。
 
 **参数**：
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `url` | string | ✓ | 目标 URL |
-| `onlyMainContent` | boolean | ✗ | 仅提取正文，去导航/页脚/广告（默认 true） |
-| `waitFor` | integer | ✗ | 等待 JavaScript 渲染的毫秒数 |
 
-> **注意**：webfetch 仅 Firecrawl 支持。Exa 和 Gemini 没有独立的 scrape 端点。
+**与 search 不同**：webfetch 的 Jina Reader 和本地 Readability 均无需 API key，
+因此即使没配任何 provider 也能工作。配了 Firecrawl key 则自动获得更高质量的 headless browser 渲染。
+
+### webfetch Provider 对比
+
+| | Firecrawl | Jina Reader | 本地 Readability |
+|---|---|---|---|
+| **JS 渲染** | ✅ headless browser | ✅ headless browser | ❌ 纯静态 HTML |
+| **需要 API key** | ✅ FIRECRAWL_API_KEY | ❌ 免费 | ❌ |
+| **回退顺序** | ① 最前（有 key 时） | ② 中间 | ③ 最后兜底 |
 
 ## 搜索 Provider 对比
 
 | | Firecrawl | Exa | Gemini |
 |---|---|---|---|
 | **search** | REST API（SDK） | REST API（SDK） | Gemini generateContent + google_search tool |
-| **fetch** | ✅ scrape → markdown | ❌ | ❌ |
 | **结果数量** | limit 参数 | numResults 参数 | 由 Gemini 决定（通常 5-10 条） |
 | **超时** | 30s + 1 retry | 无显式超时（SDK 内置） | 60s（Gemini API） |
 | **模型** | — | — | `gemini-2.5-flash`（可配 `searchModel`） |
 
-## Provider 选择与回退
+## Search Provider 选择与回退
 
 ```
 shuffle(firecrawl, exa)  →  逐个尝试  →  首个成功返回
@@ -94,9 +104,20 @@ shuffle(firecrawl, exa)  →  逐个尝试  →  首个成功返回
 
 - firecrawl + exa 随机排列：分散负载，避免单一 provider 限流
 - gemini 固定在最后：Gemini API 按 token 计费，成本高于专用搜索 API
-- 只有所有已配置的 provider 都失败时才抛错
+- 至少需要一个已配置 API key 的 provider，全失败才抛错
 
-只有配置了 API key（env 或配置文件）的 provider 才会加入候选。至少需要一个。
+## Fetch Provider 选择与回退
+
+```
+firecrawl（有 key 时） → jina → readability
+       ↓ 任何错误（含空内容）均继续
+     汇总所有错误，抛错
+```
+
+- 固定顺序，不需要 shuffle（Jina 免费，readability 本地零成本）
+- 任何 provider 失败都继续下一家——Firecrawl 403 可能是自己的 IP 被拦，Jina 429 是限流，都不影响本地 Readability
+- 零配置可用：Jina 和 readability 均无需 API key
+- 任何错误（含空内容）都继续下一家，仅 abort 立即停止
 
 ## LLM 输出格式
 
