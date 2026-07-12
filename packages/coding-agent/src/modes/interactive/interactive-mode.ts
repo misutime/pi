@@ -1249,9 +1249,10 @@ export class InteractiveMode {
 		return { label: source, scopeLabel, color: "accent" };
 	}
 
-	private getScopeGroup(sourceInfo?: SourceInfo): "user" | "project" | "path" {
+	private getScopeGroup(sourceInfo?: SourceInfo): "user" | "project" | "path" | "builtin" {
 		const source = sourceInfo?.source ?? "local";
 		const scope = sourceInfo?.scope ?? "project";
+		if (source === "builtin") return "builtin";
 		if (source === "cli" || scope === "temporary") return "path";
 		if (scope === "user") return "user";
 		if (scope === "project") return "project";
@@ -1264,14 +1265,14 @@ export class InteractiveMode {
 	}
 
 	private buildScopeGroups(items: Array<{ path: string; sourceInfo?: SourceInfo }>): Array<{
-		scope: "user" | "project" | "path";
+		scope: "user" | "project" | "path" | "builtin";
 		paths: Array<{ path: string; sourceInfo?: SourceInfo }>;
 		packages: Map<string, Array<{ path: string; sourceInfo?: SourceInfo }>>;
 	}> {
 		const groups: Record<
-			"user" | "project" | "path",
+			"user" | "project" | "path" | "builtin",
 			{
-				scope: "user" | "project" | "path";
+				scope: "user" | "project" | "path" | "builtin";
 				paths: Array<{ path: string; sourceInfo?: SourceInfo }>;
 				packages: Map<string, Array<{ path: string; sourceInfo?: SourceInfo }>>;
 			}
@@ -1279,6 +1280,7 @@ export class InteractiveMode {
 			user: { scope: "user", paths: [], packages: new Map() },
 			project: { scope: "project", paths: [], packages: new Map() },
 			path: { scope: "path", paths: [], packages: new Map() },
+			builtin: { scope: "builtin", paths: [], packages: new Map() },
 		};
 
 		for (const item of items) {
@@ -1295,14 +1297,14 @@ export class InteractiveMode {
 			}
 		}
 
-		return [groups.project, groups.user, groups.path].filter(
+		return [groups.project, groups.user, groups.builtin, groups.path].filter(
 			(group) => group.paths.length > 0 || group.packages.size > 0,
 		);
 	}
 
 	private formatScopeGroups(
 		groups: Array<{
-			scope: "user" | "project" | "path";
+			scope: "user" | "project" | "path" | "builtin";
 			paths: Array<{ path: string; sourceInfo?: SourceInfo }>;
 			packages: Map<string, Array<{ path: string; sourceInfo?: SourceInfo }>>;
 		}>,
@@ -1554,8 +1556,12 @@ export class InteractiveMode {
 						return a.name.localeCompare(b.name);
 					})
 					.map((t) => {
-						const sourceLabel =
-							t.sourceInfo?.source && t.sourceInfo.source !== "builtin" ? ` (${t.sourceInfo.source})` : "";
+						const source = t.sourceInfo?.source;
+						const sourceLabel = source
+							? source === "builtin" && t.sourceInfo?.path
+								? ` (${t.sourceInfo.path.replace(/^<|>$/g, "")})`
+								: ` (${source})`
+							: "";
 						const inactiveLabel = activeNames.has(t.name) ? "" : " (inactive)";
 						return theme.fg("dim", `  ${t.name}${sourceLabel}${inactiveLabel}`);
 					})
