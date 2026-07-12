@@ -2,7 +2,7 @@
 
 ## 快速开始
 
-将 repo 根目录加入用户级 `PATH`（推荐，cmd/pwsh/bash 通用）：
+将 repo 根目录加入用户级 `PATH`（推荐，pwsh/bash/zsh 通用）：
 
 ```powershell
 # 一次性设置，永久生效
