@@ -30,6 +30,33 @@ interface GhComment {
 }
 
 // ============================================================================
+// REST 字段规范化
+// ============================================================================
+
+/** REST API 返回 snake_case，映射成 gh CLI 的 camelCase 形状 */
+function normalizeIssue(raw: Record<string, unknown>): GhIssue {
+	return {
+		title: String(raw.title ?? ""),
+		body: String(raw.body ?? ""),
+		state: String(raw.state ?? ""),
+		number: Number(raw.number ?? 0),
+		url: String(raw.html_url ?? raw.url ?? ""),
+		author: { login: String((raw.user as Record<string, unknown> | null)?.login ?? "") },
+		createdAt: String(raw.created_at ?? ""),
+		updatedAt: String(raw.updated_at ?? ""),
+		labels: (raw.labels as Array<{ name?: string }> | null)?.map(l => ({ name: String(l.name ?? "") })) ?? [],
+	};
+}
+
+function normalizeComment(raw: Record<string, unknown>): GhComment {
+	return {
+		author: { login: String((raw.user as Record<string, unknown> | null)?.login ?? "") },
+		body: String(raw.body ?? ""),
+		createdAt: String(raw.created_at ?? ""),
+	};
+}
+
+// ============================================================================
 // 数据获取
 // ============================================================================
 
@@ -68,10 +95,13 @@ async function fetchIssue(
 		restApi(`/repos/${owner}/${repo}/issues/${number}/comments`, { signal }),
 	]);
 
-	const issue: GhIssue = JSON.parse(issueText);
-	const comments: GhComment[] = JSON.parse(commentsText);
+	const rawIssue = JSON.parse(issueText);
+	const rawComments = JSON.parse(commentsText) as Record<string, unknown>[];
 
-	return { issue, comments };
+	return {
+		issue: normalizeIssue(rawIssue as Record<string, unknown>),
+		comments: rawComments.map(normalizeComment),
+	};
 }
 
 // ============================================================================

@@ -35,6 +35,38 @@ interface GhFile {
 }
 
 // ============================================================================
+// REST 字段规范化
+// ============================================================================
+
+/** REST API 返回 snake_case，映射成 gh CLI 的 camelCase 形状 */
+function normalizePR(raw: Record<string, unknown>): GhPR {
+	return {
+		title: String(raw.title ?? ""),
+		body: String(raw.body ?? ""),
+		state: String(raw.state ?? ""),
+		number: Number(raw.number ?? 0),
+		url: String(raw.html_url ?? raw.url ?? ""),
+		author: { login: String((raw.user as Record<string, unknown> | null)?.login ?? "") },
+		createdAt: String(raw.created_at ?? ""),
+		updatedAt: String(raw.updated_at ?? ""),
+		mergedAt: raw.merged_at != null ? String(raw.merged_at) : null,
+		labels: (raw.labels as Array<{ name?: string }> | null)?.map(l => ({ name: String(l.name ?? "") })) ?? [],
+		reviewDecision: null, // REST 不返回此字段，PR view 场景足以
+		statusCheckRollup: null,
+	};
+}
+
+function normalizeFile(raw: Record<string, unknown>): GhFile {
+	return {
+		filename: String(raw.filename ?? ""),
+		status: String(raw.status ?? ""),
+		additions: Number(raw.additions ?? 0),
+		deletions: Number(raw.deletions ?? 0),
+		changes: Number(raw.changes ?? 0),
+	};
+}
+
+// ============================================================================
 // 数据获取
 // ============================================================================
 
@@ -83,10 +115,13 @@ async function fetchPR(
 		filesRaw = "[]";
 	}
 
-	const pr: GhPR = JSON.parse(prText);
-	const files: GhFile[] = JSON.parse(filesRaw);
+	const rawPR = JSON.parse(prText) as Record<string, unknown>;
+	const rawFiles = JSON.parse(filesRaw) as Record<string, unknown>[];
 
-	return { pr, files };
+	return {
+		pr: normalizePR(rawPR),
+		files: rawFiles.map(normalizeFile),
+	};
 }
 
 // ============================================================================
@@ -124,14 +159,14 @@ function formatPR(pr: GhPR, files: GhFile[]): string {
 	if (pr.statusCheckRollup && pr.statusCheckRollup.length > 0) {
 		const checks = pr.statusCheckRollup
 			.map((c) => {
-				const icon = c.conclusion === "SUCCESS"
-					? "✅"
+				const label = c.conclusion === "SUCCESS"
+					? "[PASS]"
 					: c.conclusion === "FAILURE"
-						? "❌"
+						? "[FAIL]"
 						: c.status === "IN_PROGRESS"
-							? "⏳"
-							: "⬜";
-				return `${icon} ${c.name}`;
+							? "[RUNNING]"
+							: "[PENDING]";
+				return `${label} ${c.name}`;
 			})
 			.join(", ");
 		lines.push(`- **Checks**: ${checks}`);

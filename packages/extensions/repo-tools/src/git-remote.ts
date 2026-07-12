@@ -37,18 +37,21 @@ export async function inferRepoFromCwd(): Promise<GitHubRepo | null> {
 function parseGitRemote(remote: string): GitHubRepo | null {
 	// HTTPS: https://github.com/owner/repo.git
 	// SSH:   git@github.com:owner/repo.git
+	// 注意：GitHub repo 名可以包含点（如 pi-gui.github.io），只 strip 末尾 .git
+	const extractRepo = (raw: string) => raw.replace(/\.git$/i, "");
+
 	const httpsMatch = remote.match(
-		/^https?:\/\/github\.com\/([^/]+)\/([^/\s.]+?)(?:\.git)?$/i,
+		/^https?:\/\/github\.com\/([^/]+)\/([^/\s]+?)(?:\.git)?$/i,
 	);
 	if (httpsMatch) {
-		return { owner: httpsMatch[1], repo: httpsMatch[2] };
+		return { owner: httpsMatch[1], repo: extractRepo(httpsMatch[2]) };
 	}
 
 	const sshMatch = remote.match(
-		/^git@github\.com:([^/]+)\/([^/\s.]+?)(?:\.git)?$/i,
+		/^git@github\.com:([^/]+)\/([^/\s]+?)(?:\.git)?$/i,
 	);
 	if (sshMatch) {
-		return { owner: sshMatch[1], repo: sshMatch[2] };
+		return { owner: sshMatch[1], repo: extractRepo(sshMatch[2]) };
 	}
 
 	return null;

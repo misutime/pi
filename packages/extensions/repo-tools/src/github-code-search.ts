@@ -64,14 +64,18 @@ async function fetchCodeSearch(
 		return results;
 	}
 
-	// 2. REST fallback
+	// 2. REST fallback — 字段需规范化：full_name → fullName, html_url → url
 	const enc = encodeURIComponent(query);
 	const text = await restApi(
 		`/search/code?q=${enc}&per_page=${Math.min(limit, 100)}`,
 		{ signal },
 	);
-	const data = JSON.parse(text);
-	return (data.items as CodeResult[]) ?? [];
+	const data = JSON.parse(text) as { items: Array<Record<string, unknown>> };
+	return (data.items ?? []).map((item): CodeResult => ({
+		repository: { fullName: String((item.repository as Record<string, unknown> | null)?.full_name ?? "") },
+		path: String(item.path ?? ""),
+		url: String(item.html_url ?? ""),
+	}));
 }
 
 // ============================================================================
