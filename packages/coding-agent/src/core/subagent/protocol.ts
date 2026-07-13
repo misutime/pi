@@ -6,6 +6,8 @@ export const SubAgentMethods = {
 	Cancel: "agent/cancel",
 	/** Worker → Parent: progress notification (tool call started). */
 	Progress: "agent/progress",
+	/** Parent → Worker: preflight — check extension loading and tool availability without running LLM. */
+	Preflight: "agent/preflight",
 } as const;
 
 /** Configuration passed from parent to worker on spawn. */
@@ -43,4 +45,25 @@ export interface RunResult {
 	output: string;
 	sessionPath: string;
 	truncated: boolean;
+}
+
+/** Params for agent/preflight request. */
+export interface PreflightParams {
+	agentDir: string;
+	cwd: string;
+	/** Agent tool configs to validate: name → tools allowlist. */
+	agentConfigs: Array<{ name: string; tools: string[] }>;
+}
+
+/** Per-agent preflight result. */
+export interface AgentPreflightResult {
+	name: string;
+	availableTools: string[];
+	missingTools: string[];
+}
+
+/** Result from agent/preflight. */
+export interface PreflightResult {
+	agents: AgentPreflightResult[];
+	extensionErrors: Array<{ path: string; error: string }>;
 }

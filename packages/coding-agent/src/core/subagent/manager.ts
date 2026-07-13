@@ -77,6 +77,39 @@ export class AgentManager {
 		return this._agents;
 	}
 
+	/**
+	 * Validate that each agent's configured tools exist in the given tool name set.
+	 * Returns a map of agent name → missing tool names. Empty map = all valid.
+	 */
+	validateTools(availableToolNames: ReadonlySet<string>): ReadonlyMap<string, string[]> {
+		const result = new Map<string, string[]>();
+		for (const agent of this._agents) {
+			const missing = agent.tools.filter((t) => !availableToolNames.has(t));
+			if (missing.length > 0) {
+				result.set(agent.name, missing);
+			}
+		}
+		return result;
+	}
+
+	/**
+	 * Run a worker preflight to check which tools are available in the actual worker environment.
+	 * Returns per-agent results + any extension load errors from the worker.
+	 */
+	async preflight(): Promise<{
+		agents: ReadonlyMap<string, { availableTools: string[]; missingTools: string[] }>;
+		extensionErrors: Array<{ path: string; error: string }>;
+	}> {
+		const agentConfigs = this._agents.map((a) => ({ name: a.name, tools: a.tools }));
+		const result = await this._runtime.preflight(this._agentDir, this._cwd, agentConfigs);
+
+		const agents = new Map<string, { availableTools: string[]; missingTools: string[] }>();
+		for (const a of result.agents) {
+			agents.set(a.name, { availableTools: a.availableTools, missingTools: a.missingTools });
+		}
+		return { agents, extensionErrors: result.extensionErrors };
+	}
+
 	getToolDefinition(): ToolDefinition<typeof spawnAgentSchema, SpawnAgentDetails> {
 		const self = this;
 		const agentNames = this._agents.map((a) => a.name);

@@ -362,10 +362,44 @@ export class AgentSession {
 	// Subagent system
 	private _subagentRuntime?: SubagentRuntime;
 	private _subagentManager?: AgentManager;
+	private _agentToolValidation: ReadonlyMap<string, string[]> = new Map();
+	private _agentPreflight:
+		| {
+				agents: ReadonlyMap<string, { availableTools: string[]; missingTools: string[] }>;
+				extensionErrors: Array<{ path: string; error: string }>;
+		  }
+		| undefined;
 
 	/** Loaded agent configs (from ~/.pi/agent/agents/*.md), or empty array if subagent is disabled. */
 	get agents(): ReadonlyArray<IAgentConfig> {
 		return this._subagentManager?.agents ?? [];
+	}
+
+	/**
+	 * Per-agent tool validation results from the last buildRuntime / reload.
+	 * Maps agent name → missing tool names. Empty map = all agents have all tools.
+	 */
+	get agentToolValidation(): ReadonlyMap<string, string[]> {
+		return this._agentToolValidation;
+	}
+
+	/**
+	 * Worker preflight results (available after runAgentPreflight() completes).
+	 * Undefined before preflight runs.
+	 */
+	get agentPreflight():
+		| {
+				agents: ReadonlyMap<string, { availableTools: string[]; missingTools: string[] }>;
+				extensionErrors: Array<{ path: string; error: string }>;
+		  }
+		| undefined {
+		return this._agentPreflight;
+	}
+
+	/** Run worker preflight for all agents. Call after session construction. */
+	async runAgentPreflight(): Promise<void> {
+		if (!this._subagentManager) return;
+		this._agentPreflight = await this._subagentManager.preflight();
 	}
 
 	// Tool registry for extension getTools/setTools
@@ -2655,6 +2689,12 @@ export class AgentSession {
 		this._pendingSystemPromptSnapshot = undefined;
 		this._pendingActiveToolNamesSnapshot = undefined;
 		this._pendingModelSnapshot = undefined;
+
+		// Validate agent tool configs against the current registry
+		if (this._subagentManager) {
+			const availableTools = new Set(this._toolRegistry.keys());
+			this._agentToolValidation = this._subagentManager.validateTools(availableTools);
+		}
 	}
 
 	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {

@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JsonRpcPeer, NodeIpcTransport } from "../rpc/index.ts";
-import type { ProgressParams, RunParams, RunResult, SubAgentConfig } from "./protocol.ts";
+import type { PreflightResult, ProgressParams, RunParams, RunResult, SubAgentConfig } from "./protocol.ts";
 import { SubAgentMethods } from "./protocol.ts";
 
 // ============================================================================
@@ -239,5 +239,62 @@ export class SubagentRuntime {
 			}
 		}
 		this._active.clear();
+	}
+
+	/**
+	 * Spawn a one-shot worker to check extension loading and tool availability.
+	 * Does not invoke the LLM — only loads resources and returns the tool registry.
+	 */
+	async preflight(
+		agentDir: string,
+		cwd: string,
+		agentConfigs: Array<{ name: string; tools: string[] }>,
+	): Promise<PreflightResult> {
+		let worker: ChildProcess;
+		try {
+			if (this._useSpawn) {
+				const tsxCli = resolveTsxCliPath();
+				worker = spawn(process.execPath, [tsxCli, this._workerPath], {
+					stdio: ["ignore", "ignore", "inherit", "ipc"],
+				});
+			} else {
+				worker = fork(this._workerPath, [], {
+					stdio: ["ignore", "ignore", "inherit", "ipc"],
+				});
+			}
+		} catch (err) {
+			return {
+				agents: [],
+				extensionErrors: [
+					{ path: "worker", error: `Failed to start: ${err instanceof Error ? err.message : String(err)}` },
+				],
+			};
+		}
+
+		const transport = new NodeIpcTransport(worker);
+		const peer = new JsonRpcPeer(transport, { defaultTimeoutMs: 30_000 });
+		peer.start();
+
+		try {
+			const result = await peer.request<PreflightResult>(SubAgentMethods.Preflight, {
+				agentDir,
+				cwd,
+				agentConfigs,
+			});
+			return result;
+		} catch (err) {
+			const message = err && typeof err === "object" && "message" in err ? String(err.message) : String(err);
+			return {
+				agents: [],
+				extensionErrors: [{ path: "worker", error: `Preflight failed: ${message}` }],
+			};
+		} finally {
+			peer.close();
+			try {
+				worker.kill("SIGKILL");
+			} catch {
+				/* ignore */
+			}
+		}
 	}
 }

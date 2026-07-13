@@ -7,6 +7,8 @@
  */
 
 import { join } from "node:path";
+import type { ShouldStopAfterTurnContext } from "@earendil-works/pi-agent-core";
+import type { Model } from "@earendil-works/pi-ai/compat";
 import type { AgentSession } from "../agent-session.ts";
 import { AuthStorage } from "../auth-storage.ts";
 import { ModelRegistry } from "../model-registry.ts";
@@ -15,7 +17,15 @@ import { DefaultResourceLoader } from "../resource-loader.ts";
 import { JsonRpcPeer, WorkerIpcTransport } from "../rpc/index.ts";
 import { createAgentSession } from "../sdk.ts";
 import { SessionManager } from "../session-manager.ts";
-import type { ProgressParams, RunParams, RunResult, SubAgentConfig } from "./protocol.ts";
+import type {
+	AgentPreflightResult,
+	PreflightParams,
+	PreflightResult,
+	ProgressParams,
+	RunParams,
+	RunResult,
+	SubAgentConfig,
+} from "./protocol.ts";
 import { SubAgentMethods } from "./protocol.ts";
 
 interface ContentBlock {
@@ -36,6 +46,15 @@ class CancelError extends Error {
 const transport = new WorkerIpcTransport();
 const peer = new JsonRpcPeer(transport);
 peer.start();
+
+peer.onRequest(SubAgentMethods.Preflight, async (params) => {
+	const { agentDir, cwd, agentConfigs } = params as PreflightParams;
+	try {
+		return await handlePreflight(agentDir, cwd, agentConfigs);
+	} finally {
+		setImmediate(() => process.disconnect());
+	}
+});
 
 peer.onRequest(SubAgentMethods.Run, async (params) => {
 	const { agentId, task, config } = params as RunParams;
@@ -78,6 +97,96 @@ function buildAgentSystemPrompt(config: SubAgentConfig): string {
 
 function buildAgentUserPrompt(config: SubAgentConfig, task: string): string {
 	return ["AGENT", config.agentName, "", "TASK", task].join("\n");
+}
+
+/**
+ * Shared session creation for both preflight and run modes.
+ * Keeps the common parameters in one place to prevent drift between
+ * validation (preflight) and execution (run) paths.
+ */
+function createSubagentSession(options: {
+	cwd: string;
+	agentDir: string;
+	resourceLoader: DefaultResourceLoader;
+	sessionManager: SessionManager;
+	tools: string[];
+	excludeTools: string[];
+	model?: Model<any>;
+	modelRegistry?: ModelRegistry;
+	authStorage?: AuthStorage;
+	shouldStopAfterTurn?: (ctx: ShouldStopAfterTurnContext) => boolean;
+}) {
+	return createAgentSession({
+		cwd: options.cwd,
+		agentDir: options.agentDir,
+		resourceLoader: options.resourceLoader,
+		sessionManager: options.sessionManager,
+		tools: options.tools,
+		excludeTools: options.excludeTools,
+		model: options.model,
+		modelRegistry: options.modelRegistry,
+		authStorage: options.authStorage,
+		shouldStopAfterTurn: options.shouldStopAfterTurn,
+	});
+}
+
+async function handlePreflight(
+	agentDir: string,
+	cwd: string,
+	agentConfigs: Array<{ name: string; tools: string[] }>,
+): Promise<PreflightResult> {
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir,
+		noSkills: true,
+		noContextFiles: true,
+		noPromptTemplates: true,
+		noThemes: true,
+		systemPrompt: "",
+		appendSystemPrompt: [],
+	});
+	await resourceLoader.reload();
+
+	const extResult = resourceLoader.getExtensions();
+	const extensionErrors = extResult.errors.map((e) => ({ path: e.path, error: e.error }));
+
+	const agents: AgentPreflightResult[] = [];
+	for (const cfg of agentConfigs) {
+		try {
+			const { session } = await createSubagentSession({
+				cwd,
+				agentDir,
+				resourceLoader,
+				sessionManager: SessionManager.inMemory(cwd),
+				tools: cfg.tools,
+				excludeTools: ["spawn_agent"],
+			});
+
+			const activeNames = new Set(session.getActiveToolNames());
+			const missingTools = cfg.tools.filter((t) => !activeNames.has(t));
+			agents.push({
+				name: cfg.name,
+				availableTools: cfg.tools.filter((t) => activeNames.has(t)),
+				missingTools,
+			});
+
+			try {
+				session.dispose();
+			} catch {
+				// best-effort
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			agents.push({
+				name: cfg.name,
+				availableTools: [],
+				missingTools: cfg.tools,
+			});
+			extensionErrors.push({ path: `agent:${cfg.name}`, error: message });
+		}
+	}
+
+	return { agents, extensionErrors };
 }
 
 async function handleRun(agentId: string, task: string, config: SubAgentConfig): Promise<RunResult> {
@@ -140,16 +249,16 @@ async function handleRun(agentId: string, task: string, config: SubAgentConfig):
 			);
 		}
 
-		const { session } = await createAgentSession({
+		const { session } = await createSubagentSession({
 			cwd: config.cwd,
 			agentDir: config.agentDir,
-			sessionManager,
 			resourceLoader,
+			sessionManager,
+			tools: config.agentTools,
+			excludeTools: ["spawn_agent"],
 			model: resolved.model,
 			modelRegistry,
 			authStorage,
-			tools: config.agentTools,
-			excludeTools: ["spawn_agent"],
 			shouldStopAfterTurn: (ctx) => {
 				if (ctx.message.stopReason !== "toolUse") return false;
 				const count = ctx.newMessages.filter((m) => m.role === "assistant").length;
@@ -160,19 +269,13 @@ async function handleRun(agentId: string, task: string, config: SubAgentConfig):
 		});
 		childSession = session;
 
-		// Diagnose: warn if configured tools are missing from the registry
+		// Validate that all configured tools are available in the registry.
+		// Any missing tool is a hard error — partial tool sets mislead the LLM.
 		const activeNames = new Set(session.getActiveToolNames());
-		for (const toolName of config.agentTools) {
-			if (!activeNames.has(toolName)) {
-				console.error(
-					`[subagent-worker] Configured tool "${toolName}" not found in registry (agent: ${config.agentName})`,
-				);
-			}
-		}
-
-		if (activeNames.size === 0) {
+		const missingTools = config.agentTools.filter((t) => !activeNames.has(t));
+		if (missingTools.length > 0) {
 			throw new Error(
-				`Agent "${config.agentName}" has no available tools. ` +
+				`Agent "${config.agentName}" is missing required tools: [${missingTools.join(", ")}]. ` +
 					`Configured: [${config.agentTools.join(", ") || "(none)"}]. ` +
 					"Check that the required extensions are installed and loaded.",
 			);
