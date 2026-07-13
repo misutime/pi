@@ -283,7 +283,7 @@ function resolveSubagentWorkerPath(): { workerPath: string; execArgv?: string[] 
 	const moduleDir = dirname(fileURLToPath(import.meta.url));
 	const tsEntry = join(moduleDir, "subagent", "entry.ts");
 	if (existsSync(tsEntry)) {
-		return { workerPath: tsEntry, execArgv: ["--import", "tsx/esm"] };
+		return { workerPath: tsEntry, execArgv: ["--import", "tsx/esm", "--experimental-json-modules"] };
 	}
 	return { workerPath: join(moduleDir, "subagent", "entry.js") };
 }
@@ -2638,6 +2638,9 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride ? Object.keys(this._baseToolsOverride) : [...allToolNames];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
+		if (this._subagentManager) {
+			baseActiveToolNames.push("spawn_agent");
+		}
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,
