@@ -14,8 +14,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, dirname } from "node:path";
 import type {
 	Agent,
 	AgentEvent,
@@ -36,7 +35,6 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
-import { getAgentDir, isBunBinary } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -93,8 +91,6 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
-import type { IAgentConfig } from "./subagent/index.ts";
-import { AgentManager, loadAgentsFromDir, SubagentRuntime } from "./subagent/index.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { allToolNames, createAllToolDefinitions } from "./tools/index.ts";
@@ -168,8 +164,6 @@ export interface AgentSessionConfig {
 	sessionManager: SessionManager;
 	settingsManager: SettingsManager;
 	cwd: string;
-	/** Global config directory. Default: ~/.pi/agent */
-	agentDir?: string;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
@@ -268,27 +262,6 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 /** Standard thinking levels */
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
 
-/** Resolve subagent worker path. */
-function resolveSubagentWorkerPath(): { workerPath: string; useSpawn?: boolean } {
-	// Bun compiled binary: worker code must be embedded in the binary itself.
-	// Forking a file path is not possible because there are no .ts/.js source files on disk.
-	// When Bun binary support is added, use self-spawn: fork(process.execPath, ["--subagent-worker"])
-	// and have the CLI entry detect --subagent-worker to run runSubagentWorker().
-	if (isBunBinary) {
-		throw new Error(
-			"Subagent worker forking is not supported in Bun compiled binaries. " +
-				"Run pi via Node.js (npm) to use subagent features.",
-		);
-	}
-
-	const moduleDir = dirname(fileURLToPath(import.meta.url));
-	const tsEntry = join(moduleDir, "subagent", "entry.ts");
-	if (existsSync(tsEntry)) {
-		return { workerPath: tsEntry, useSpawn: true };
-	}
-	return { workerPath: join(moduleDir, "subagent", "entry.js") };
-}
-
 // ============================================================================
 // AgentSession Class
 // ============================================================================
@@ -359,49 +332,6 @@ export class AgentSession {
 	// Model registry for API key resolution
 	private _modelRegistry: ModelRegistry;
 
-	// Subagent system
-	private _subagentRuntime?: SubagentRuntime;
-	private _subagentManager?: AgentManager;
-	private _agentToolValidation: ReadonlyMap<string, string[]> = new Map();
-	private _agentPreflight:
-		| {
-				agents: ReadonlyMap<string, { availableTools: string[]; missingTools: string[] }>;
-				extensionErrors: Array<{ path: string; error: string }>;
-		  }
-		| undefined;
-
-	/** Loaded agent configs (from ~/.pi/agent/agents/*.md), or empty array if subagent is disabled. */
-	get agents(): ReadonlyArray<IAgentConfig> {
-		return this._subagentManager?.agents ?? [];
-	}
-
-	/**
-	 * Per-agent tool validation results from the last buildRuntime / reload.
-	 * Maps agent name → missing tool names. Empty map = all agents have all tools.
-	 */
-	get agentToolValidation(): ReadonlyMap<string, string[]> {
-		return this._agentToolValidation;
-	}
-
-	/**
-	 * Worker preflight results (available after runAgentPreflight() completes).
-	 * Undefined before preflight runs.
-	 */
-	get agentPreflight():
-		| {
-				agents: ReadonlyMap<string, { availableTools: string[]; missingTools: string[] }>;
-				extensionErrors: Array<{ path: string; error: string }>;
-		  }
-		| undefined {
-		return this._agentPreflight;
-	}
-
-	/** Run worker preflight for all agents. Call after session construction. */
-	async runAgentPreflight(): Promise<void> {
-		if (!this._subagentManager) return;
-		this._agentPreflight = await this._subagentManager.preflight();
-	}
-
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
@@ -428,33 +358,6 @@ export class AgentSession {
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
-
-		// Auto-resolve subagent worker path and load agents.
-		// If no user-defined agents exist, subagent runtime is not created.
-		{
-			const agentDir = config.agentDir ?? getAgentDir();
-			const { agents, errors } = loadAgentsFromDir(agentDir);
-			if (errors.length > 0) {
-				for (const err of errors) {
-					console.error(`[subagent] ${err}`);
-				}
-			}
-			if (agents.length > 0) {
-				const { workerPath, useSpawn } = resolveSubagentWorkerPath();
-				this._subagentRuntime = new SubagentRuntime({
-					workerPath,
-					useSpawn,
-				});
-				this._subagentManager = new AgentManager({
-					runtime: this._subagentRuntime,
-					cwd: config.cwd,
-					agentDir,
-					sessionDir: config.sessionManager.getSessionDir(),
-					sessionFile: config.sessionManager.getSessionFile(),
-					agents,
-				});
-			}
-		}
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -926,7 +829,6 @@ export class AgentSession {
 			this.abortBranchSummary();
 			this.abortBash();
 			this.agent.abort();
-			this._subagentRuntime?.shutdown();
 		} catch {
 			// Dispose must succeed even if an abort hook throws.
 		}
@@ -1122,11 +1024,8 @@ export class AgentSession {
 
 		const loaderSystemPrompt = this._resourceLoader.getSystemPrompt();
 		const loaderAppendSystemPrompt = this._resourceLoader.getAppendSystemPrompt();
-		const appendParts = [...loaderAppendSystemPrompt];
-		if (this._subagentManager && validToolNames.includes("spawn_agent")) {
-			appendParts.push(this._subagentManager.getSystemPromptAppend());
-		}
-		const appendSystemPrompt = appendParts.length > 0 ? appendParts.join("\n\n") : undefined;
+		const appendSystemPrompt =
+			loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined;
 		const loadedSkills = this._resourceLoader.getSkills().skills;
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
 
@@ -2651,11 +2550,6 @@ export class AgentSession {
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
 
-		// Register spawn_agent if subagent runtime is configured
-		if (this._subagentManager) {
-			this._baseToolDefinitions.set("spawn_agent", this._subagentManager.getToolDefinition() as ToolDefinition);
-		}
-
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (options.flagValues) {
 			for (const [name, value] of options.flagValues) {
@@ -2678,9 +2572,6 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride ? Object.keys(this._baseToolsOverride) : [...allToolNames];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
-		if (this._subagentManager) {
-			baseActiveToolNames.push("spawn_agent");
-		}
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,
@@ -2689,12 +2580,6 @@ export class AgentSession {
 		this._pendingSystemPromptSnapshot = undefined;
 		this._pendingActiveToolNamesSnapshot = undefined;
 		this._pendingModelSnapshot = undefined;
-
-		// Validate agent tool configs against the current registry
-		if (this._subagentManager) {
-			const availableTools = new Set(this._toolRegistry.keys());
-			this._agentToolValidation = this._subagentManager.validateTools(availableTools);
-		}
 	}
 
 	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {

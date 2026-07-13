@@ -745,12 +745,6 @@ export class InteractiveMode {
 
 		await this.themeController.applyFromSettings();
 
-		// Start worker preflight for agent tool validation (async, results update on next render)
-		void this.session.runAgentPreflight().then(() => {
-			this.showLoadedResources({ force: false, showDiagnosticsWhenQuiet: true });
-			this.ui.requestRender();
-		});
-
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
 			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
@@ -1573,37 +1567,6 @@ export class InteractiveMode {
 				addLoadedSection("Tools", toolCompactList, toolExpandedList);
 			}
 
-			// Show loaded agents (only when spawn_agent is active)
-			const agents = this.session.agents;
-			if (agents.length > 0 && new Set(this.session.getActiveToolNames()).has("spawn_agent")) {
-				const preflight = this.session.agentPreflight;
-				const staticValidation = this.session.agentToolValidation;
-				const agentCompactList = formatCompactList(
-					agents.map((a) => {
-						const pf = preflight?.agents.get(a.name);
-						if (pf && pf.missingTools.length === 0) return a.name;
-						if (pf) return `${a.name} [error]`;
-						if (staticValidation.has(a.name)) return `${a.name} [error]`;
-						return `${a.name} [pending]`;
-					}),
-				);
-				const agentExpandedList = agents
-					.map((a) => {
-						const toolsStr = a.tools.length > 0 ? a.tools.join(", ") : "(no tools)";
-						const pf = preflight?.agents.get(a.name);
-						if (pf) {
-							const status =
-								pf.missingTools.length === 0 ? "ok" : `error: missing ${pf.missingTools.join(", ")}`;
-							return theme.fg("dim", `  ${a.name}  ${a.model}  [${toolsStr}]  ${a.description}  ${status}`);
-						}
-						const missing = staticValidation.get(a.name);
-						const warning = missing ? `  error: (parent) missing ${missing.join(", ")}` : "  [pending]";
-						return theme.fg("dim", `  ${a.name}  ${a.model}  [${toolsStr}]  ${a.description}${warning}`);
-					})
-					.join("\n");
-				addLoadedSection("Agents", agentCompactList, agentExpandedList);
-			}
-
 			// Show loaded themes (excluding built-in)
 			const loadedThemes = themesResult.themes;
 			const customThemes = loadedThemes.filter((t) => t.sourcePath);
@@ -1653,12 +1616,6 @@ export class InteractiveMode {
 				for (const error of extensionErrors) {
 					extensionDiagnostics.push({ type: "error", message: error.error, path: error.path });
 				}
-			}
-
-			// Merge worker preflight extension errors
-			const preflightErrors = this.session.agentPreflight?.extensionErrors ?? [];
-			for (const err of preflightErrors) {
-				extensionDiagnostics.push({ type: "error", message: err.error, path: err.path });
 			}
 
 			const commandDiagnostics = this.session.extensionRunner.getCommandDiagnostics();
