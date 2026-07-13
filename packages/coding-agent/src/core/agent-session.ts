@@ -88,6 +88,7 @@ import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
+import type { SemanticIndex } from "./semantic/index.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
@@ -98,6 +99,7 @@ import { AgentManager, loadAgentsFromDir, SubagentRuntime } from "./subagent/ind
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { allToolNames, createAllToolDefinitions } from "./tools/index.ts";
+import { createSemanticToolDefinitions } from "./tools/semantic-tools.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 
 // ============================================================================
@@ -195,6 +197,8 @@ export interface AgentSessionConfig {
 	extensionRunnerRef?: { current?: ExtensionRunner };
 	/** Session start event metadata emitted when extensions bind to this runtime. */
 	sessionStartEvent?: SessionStartEvent;
+	/** Optional semantic index (enables go_to_definition, find_references, etc). */
+	semanticIndex?: SemanticIndex;
 }
 
 export interface ExtensionBindings {
@@ -362,6 +366,7 @@ export class AgentSession {
 	// Subagent system
 	private _subagentRuntime?: SubagentRuntime;
 	private _subagentManager?: AgentManager;
+	private _semanticIndex?: SemanticIndex;
 	private _agentToolValidation: ReadonlyMap<string, string[]> = new Map();
 	private _agentPreflight:
 		| {
@@ -428,6 +433,7 @@ export class AgentSession {
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
+		this._semanticIndex = config.semanticIndex;
 
 		// Auto-resolve subagent worker path and load agents.
 		// If no user-defined agents exist, subagent runtime is not created.
@@ -927,6 +933,7 @@ export class AgentSession {
 			this.abortBash();
 			this.agent.abort();
 			this._subagentRuntime?.shutdown();
+			void this._semanticIndex?.shutdown();
 		} catch {
 			// Dispose must succeed even if an abort hook throws.
 		}
@@ -2654,6 +2661,13 @@ export class AgentSession {
 		// Register spawn_agent if subagent runtime is configured
 		if (this._subagentManager) {
 			this._baseToolDefinitions.set("spawn_agent", this._subagentManager.getToolDefinition() as ToolDefinition);
+		}
+
+		// Register semantic tools if SemanticIndex is available
+		if (this._semanticIndex) {
+			for (const def of createSemanticToolDefinitions({ semanticIndex: this._semanticIndex })) {
+				this._baseToolDefinitions.set(def.name, def as ToolDefinition);
+			}
 		}
 
 		const extensionsResult = this._resourceLoader.getExtensions();

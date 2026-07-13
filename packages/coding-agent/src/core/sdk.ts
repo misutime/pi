@@ -9,16 +9,20 @@ import { clampThinkingLevel, type Message, type Model, streamSimple } from "@ear
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
+import { StructuralSearch } from "./ast/search.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
+import { LspManager } from "./lsp/manager.ts";
 import { convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { findInitialModel } from "./model-resolver.ts";
+import { ProcessManager } from "./process-manager.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
+import { SemanticIndex } from "./semantic/semantic-index.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
@@ -406,6 +410,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		excludedToolNames,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
+		// LSP: enabled via LspManager (按语言按需启动 LSP server)。
+		// Server 未安装时 graceful fallback 到 sg CLI。
+		semanticIndex: new SemanticIndex(new LspManager(new ProcessManager(), cwd), new StructuralSearch()),
 	});
 	const extensionsResult = resourceLoader.getExtensions();
 

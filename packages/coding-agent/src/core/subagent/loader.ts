@@ -4,13 +4,38 @@
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getAgentDir } from "../../config.ts";
 import { parseFrontmatter } from "../../utils/frontmatter.ts";
 import type { IAgentConfig } from "./types.ts";
 
 export function loadAgentsFromDir(agentDir?: string): { agents: IAgentConfig[]; errors: string[] } {
 	const dir = join(agentDir ?? getAgentDir(), "agents");
+	const result = loadDir(dir);
 
+	// Also load builtin agents shipped with the package.
+	const builtinDir = resolveBuiltinAgentsDir();
+	if (builtinDir) {
+		const builtinResult = loadDir(builtinDir);
+		return {
+			agents: [...builtinResult.agents, ...result.agents],
+			errors: [...builtinResult.errors, ...result.errors],
+		};
+	}
+
+	return result;
+}
+
+function resolveBuiltinAgentsDir(): string | null {
+	try {
+		const url = new URL("./builtin-agents/", import.meta.url);
+		return fileURLToPath(url);
+	} catch {
+		return null;
+	}
+}
+
+function loadDir(dir: string): { agents: IAgentConfig[]; errors: string[] } {
 	const agents: IAgentConfig[] = [];
 	const errors: string[] = [];
 
