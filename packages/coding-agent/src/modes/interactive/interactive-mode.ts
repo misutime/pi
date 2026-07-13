@@ -1567,6 +1567,19 @@ export class InteractiveMode {
 				addLoadedSection("Tools", toolCompactList, toolExpandedList);
 			}
 
+			// Show loaded agents
+			const agents = this.session.agents;
+			if (agents.length > 0) {
+				const agentCompactList = formatCompactList(agents.map((a) => a.name));
+				const agentExpandedList = agents
+					.map((a) => {
+						const toolsStr = a.tools.length > 0 ? a.tools.join(", ") : "(no tools)";
+						return theme.fg("dim", `  ${a.name}  ${a.model}  [${toolsStr}]  ${a.description}`);
+					})
+					.join("\n");
+				addLoadedSection("Agents", agentCompactList, agentExpandedList);
+			}
+
 			// Show loaded themes (excluding built-in)
 			const loadedThemes = themesResult.themes;
 			const customThemes = loadedThemes.filter((t) => t.sourcePath);

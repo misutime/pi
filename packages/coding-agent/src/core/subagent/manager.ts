@@ -72,6 +72,11 @@ export class AgentManager {
 		return buildSubagentSystemPromptAppend(this._agents);
 	}
 
+	/** Loaded agent configs. */
+	get agents(): ReadonlyArray<IAgentConfig> {
+		return this._agents;
+	}
+
 	getToolDefinition(): ToolDefinition<typeof spawnAgentSchema, SpawnAgentDetails> {
 		const self = this;
 		const agentNames = this._agents.map((a) => a.name);

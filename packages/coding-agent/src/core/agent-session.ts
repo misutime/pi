@@ -93,6 +93,7 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
+import type { IAgentConfig } from "./subagent/index.ts";
 import { AgentManager, loadAgentsFromDir, SubagentRuntime } from "./subagent/index.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
@@ -268,7 +269,7 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
 
 /** Resolve subagent worker path. */
-function resolveSubagentWorkerPath(): { workerPath: string; execArgv?: string[] } {
+function resolveSubagentWorkerPath(): { workerPath: string; useSpawn?: boolean } {
 	// Bun compiled binary: worker code must be embedded in the binary itself.
 	// Forking a file path is not possible because there are no .ts/.js source files on disk.
 	// When Bun binary support is added, use self-spawn: fork(process.execPath, ["--subagent-worker"])
@@ -283,7 +284,7 @@ function resolveSubagentWorkerPath(): { workerPath: string; execArgv?: string[] 
 	const moduleDir = dirname(fileURLToPath(import.meta.url));
 	const tsEntry = join(moduleDir, "subagent", "entry.ts");
 	if (existsSync(tsEntry)) {
-		return { workerPath: tsEntry, execArgv: ["--import", "tsx/esm", "--experimental-json-modules"] };
+		return { workerPath: tsEntry, useSpawn: true };
 	}
 	return { workerPath: join(moduleDir, "subagent", "entry.js") };
 }
@@ -362,6 +363,11 @@ export class AgentSession {
 	private _subagentRuntime?: SubagentRuntime;
 	private _subagentManager?: AgentManager;
 
+	/** Loaded agent configs (from ~/.pi/agent/agents/*.md), or empty array if subagent is disabled. */
+	get agents(): ReadonlyArray<IAgentConfig> {
+		return this._subagentManager?.agents ?? [];
+	}
+
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
@@ -400,10 +406,10 @@ export class AgentSession {
 				}
 			}
 			if (agents.length > 0) {
-				const { workerPath, execArgv } = resolveSubagentWorkerPath();
+				const { workerPath, useSpawn } = resolveSubagentWorkerPath();
 				this._subagentRuntime = new SubagentRuntime({
 					workerPath,
-					execArgv,
+					useSpawn,
 				});
 				this._subagentManager = new AgentManager({
 					runtime: this._subagentRuntime,

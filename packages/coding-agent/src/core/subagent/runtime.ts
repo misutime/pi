@@ -1,8 +1,28 @@
-import { type ChildProcess, fork } from "node:child_process";
+import { type ChildProcess, fork, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { JsonRpcPeer, NodeIpcTransport } from "../rpc/index.ts";
 import type { ProgressParams, RunParams, RunResult, SubAgentConfig } from "./protocol.ts";
 import { SubAgentMethods } from "./protocol.ts";
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/** Walk up from the current module directory to find the pinned tsx CLI in node_modules. */
+function resolveTsxCliPath(): string {
+	let dir = dirname(fileURLToPath(import.meta.url));
+	while (true) {
+		const candidate = join(dir, "node_modules", "tsx", "dist", "cli.mjs");
+		if (existsSync(candidate)) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	throw new Error("tsx CLI not found in node_modules. Is tsx installed?");
+}
 
 interface RuntimeRecord {
 	worker: ChildProcess;
@@ -25,17 +45,17 @@ export class SubagentRuntime {
 	private _timeoutMs: number;
 	private _abortGraceMs: number;
 	private _workerPath: string;
-	private _execArgv: string[] | undefined;
+	private _useSpawn: boolean;
 
 	constructor(opts: {
 		workerPath: string;
-		execArgv?: string[];
+		useSpawn?: boolean;
 		maxConcurrency?: number;
 		timeoutMs?: number;
 		abortGraceMs?: number;
 	}) {
 		this._workerPath = opts.workerPath;
-		this._execArgv = opts.execArgv;
+		this._useSpawn = opts.useSpawn ?? false;
 		this._maxConcurrency = opts.maxConcurrency ?? 5;
 		this._timeoutMs = opts.timeoutMs ?? 120_000;
 		this._abortGraceMs = opts.abortGraceMs ?? 3_000;
@@ -58,12 +78,20 @@ export class SubagentRuntime {
 
 		let worker: ChildProcess;
 		try {
-			worker = fork(this._workerPath, [], {
-				stdio: ["ignore", "ignore", "inherit", "ipc"],
-				execArgv: this._execArgv,
-			});
+			if (this._useSpawn) {
+				// Use current Node to run tsx's CLI directly — avoids npx/shell PATH issues
+				// and ensures IPC connects to the entry.ts process, not a wrapper.
+				const tsxCli = resolveTsxCliPath();
+				worker = spawn(process.execPath, [tsxCli, this._workerPath], {
+					stdio: ["ignore", "ignore", "inherit", "ipc"],
+				});
+			} else {
+				worker = fork(this._workerPath, [], {
+					stdio: ["ignore", "ignore", "inherit", "ipc"],
+				});
+			}
 		} catch (err) {
-			throw new Error(`Failed to fork subagent: ${err instanceof Error ? err.message : String(err)}`);
+			throw new Error(`Failed to start subagent worker: ${err instanceof Error ? err.message : String(err)}`);
 		}
 
 		const transport = new NodeIpcTransport(worker);
