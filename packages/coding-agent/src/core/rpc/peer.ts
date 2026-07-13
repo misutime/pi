@@ -21,6 +21,8 @@ export class JsonRpcPeer {
 	private _notificationHandlers = new Map<string, Array<(params: unknown) => void>>();
 	private _requestHandlers = new Map<string, (params: unknown) => unknown | Promise<unknown>>();
 	private _unsubTransport: (() => void) | undefined;
+	private _unsubClose: (() => void) | undefined;
+	private _unsubError: (() => void) | undefined;
 	private _defaultTimeoutMs: number;
 
 	constructor(transport: RpcTransport, options?: JsonRpcPeerOptions) {
@@ -32,6 +34,14 @@ export class JsonRpcPeer {
 	start(): void {
 		this._unsubTransport = this._transport.onMessage((msg) => this._handleMessage(msg));
 		this._transport.start();
+
+		// Cancel all pending requests when the transport closes or errors
+		if (this._transport.onClose) {
+			this._unsubClose = this._transport.onClose(() => this.cancelAll());
+		}
+		if (this._transport.onError) {
+			this._unsubError = this._transport.onError(() => this.cancelAll());
+		}
 	}
 
 	/** Register a method handler for incoming requests. */
@@ -80,7 +90,11 @@ export class JsonRpcPeer {
 				method,
 				params,
 			};
-			this._transport.send(request);
+			if (!this._transport.send(request)) {
+				clearTimeout(timeout);
+				this._pending.delete(id);
+				reject({ code: ErrorCode.InternalError, message: `Transport closed, cannot send: ${method}` });
+			}
 		});
 	}
 
@@ -119,6 +133,8 @@ export class JsonRpcPeer {
 		this._notificationHandlers.clear();
 		this._requestHandlers.clear();
 		this._unsubTransport?.();
+		this._unsubClose?.();
+		this._unsubError?.();
 		this._transport.close();
 	}
 
