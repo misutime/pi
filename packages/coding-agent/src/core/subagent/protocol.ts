@@ -3,7 +3,7 @@ export const SubAgentMethods = {
 	/** Parent → Worker: start a task. */
 	Run: "agent/run",
 	/** Parent → Worker: cancel a running task. */
-	Cancel: "$/cancelRequest",
+	Cancel: "agent/cancel",
 	/** Worker → Parent: progress notification (tool call started). */
 	Progress: "agent/progress",
 } as const;
