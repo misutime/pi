@@ -7,15 +7,9 @@ $ErrorActionPreference = "Stop"
 # 找到脚本所在目录 = repo 根目录
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# 切到 repo 根目录执行
-Push-Location $repoRoot
-try {
-	$tsxBin = Join-Path $repoRoot "node_modules/.bin/tsx.cmd"
-	if (-not (Test-Path -LiteralPath $tsxBin)) {
-		throw "tsx not found. Run 'npm install' from $repoRoot first."
-	}
-	$cliPath = Join-Path $repoRoot "packages/coding-agent/src/cli.ts"
-	& $tsxBin $cliPath @args
-} finally {
-	Pop-Location
+$tsxBin = Join-Path $repoRoot "node_modules/.bin/tsx.cmd"
+if (-not (Test-Path -LiteralPath $tsxBin)) {
+	throw "tsx not found. Run 'npm install' from $repoRoot first."
 }
+$cliPath = Join-Path $repoRoot "packages/coding-agent/src/cli.ts"
+& $tsxBin $cliPath @args
