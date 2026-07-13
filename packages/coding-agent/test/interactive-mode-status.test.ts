@@ -509,6 +509,8 @@ describe("InteractiveMode.showLoadedResources", () => {
 			},
 			session: {
 				promptTemplates: [],
+				getAllTools: () => [],
+				getActiveToolNames: () => [],
 				extensionRunner: {
 					getCommandDiagnostics: () => [],
 					getShortcutDiagnostics: () => [],
