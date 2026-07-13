@@ -119,6 +119,13 @@ async function handleRun(agentId: string, task: string, config: SubAgentConfig):
 			appendSystemPrompt: [],
 		});
 		await resourceLoader.reload();
+
+		// Log extension load errors for diagnostics
+		const extResult = resourceLoader.getExtensions();
+		for (const err of extResult.errors) {
+			console.error(`[subagent-worker] Extension load error: ${err.path} — ${err.error}`);
+		}
+
 		checkCancelled();
 
 		const authPath = join(config.agentDir, "auth.json");
@@ -152,6 +159,24 @@ async function handleRun(agentId: string, task: string, config: SubAgentConfig):
 			},
 		});
 		childSession = session;
+
+		// Diagnose: warn if configured tools are missing from the registry
+		const activeNames = new Set(session.getActiveToolNames());
+		for (const toolName of config.agentTools) {
+			if (!activeNames.has(toolName)) {
+				console.error(
+					`[subagent-worker] Configured tool "${toolName}" not found in registry (agent: ${config.agentName})`,
+				);
+			}
+		}
+
+		if (activeNames.size === 0) {
+			throw new Error(
+				`Agent "${config.agentName}" has no available tools. ` +
+					`Configured: [${config.agentTools.join(", ") || "(none)"}]. ` +
+					"Check that the required extensions are installed and loaded.",
+			);
+		}
 
 		abortListener = () => {
 			void childSession!.abort()?.catch(() => {});

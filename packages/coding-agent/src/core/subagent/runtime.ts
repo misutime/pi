@@ -59,7 +59,7 @@ export class SubagentRuntime {
 		let worker: ChildProcess;
 		try {
 			worker = fork(this._workerPath, [], {
-				stdio: ["ignore", "ignore", "ignore", "ipc"],
+				stdio: ["ignore", "ignore", "inherit", "ipc"],
 				execArgv: this._execArgv,
 			});
 		} catch (err) {
