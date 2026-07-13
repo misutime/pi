@@ -1573,9 +1573,9 @@ export class InteractiveMode {
 				addLoadedSection("Tools", toolCompactList, toolExpandedList);
 			}
 
-			// Show loaded agents
+			// Show loaded agents (only when spawn_agent is active)
 			const agents = this.session.agents;
-			if (agents.length > 0) {
+			if (agents.length > 0 && new Set(this.session.getActiveToolNames()).has("spawn_agent")) {
 				const preflight = this.session.agentPreflight;
 				const staticValidation = this.session.agentToolValidation;
 				const agentCompactList = formatCompactList(
