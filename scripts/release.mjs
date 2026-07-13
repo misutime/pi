@@ -178,7 +178,7 @@ run("npm run check");
 console.log();
 
 console.log("Running tests...");
-run("./test.sh");
+run("just test");
 console.log();
 
 // 6. Commit and tag
