@@ -17,7 +17,7 @@
 - Added cache-friendly dynamic tool loading for extension tools activated by tool results. Supported Anthropic and OpenAI Responses models load definitions where they become available, preserving the cached prompt prefix. See [Dynamic Tool Loading](docs/extensions.md#dynamic-tool-loading) ([#6474](https://github.com/earendil-works/pi-mono/pull/6474)).
 - Added inherited native `xhigh` and `max` thinking levels for Claude Fable 5 across all generated provider catalogs ([#6490](https://github.com/earendil-works/pi-mono/pull/6490) by [@davidbrai](https://github.com/davidbrai)).
 - Added `Ctrl+X` to copy the last assistant message, or the selected message in `/tree`.
-- Added `ast` built-in tool for structured code search via ast-grep CLI. Auto-downloads the `sg` binary on first use, same pattern as `find`/`grep`. Supports JS/TS, Python, Rust, Go, Java, C/C++, and more.
+- Added `ast` built-in tool — a read-only structural code search powered by ast-grep. Auto-downloads the `sg` binary on first use, same pattern as `find`/`grep`. Returns file paths, 1-based line numbers, and named captures. Supports single-file auto-detection, directory search with language, include/exclude globs, result/byte/line truncation, cancellation, and timeout. Read-only by design: use `ast → read → edit` for modifications.
 
 ### Fixed
 

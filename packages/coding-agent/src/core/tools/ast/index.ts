@@ -8,6 +8,14 @@ import type { ToolDefinition, ToolRenderResultOptions } from "../../extensions/t
 import { resolveToCwd } from "../path-utils.ts";
 import { getTextOutput, invalidArgText, shortenPath, str } from "../render-utils.ts";
 import { wrapToolDefinition } from "../tool-definition-wrapper.ts";
+import {
+	DEFAULT_MAX_BYTES,
+	formatSize,
+	GREP_MAX_LINE_LENGTH,
+	type TruncationResult,
+	truncateHead,
+	truncateLine,
+} from "../truncate.ts";
 import { StructuralSearch } from "./search.ts";
 import type { PatternMatch } from "./types.ts";
 
@@ -16,15 +24,16 @@ const astSchema = Type.Object({
 		description:
 			"Code pattern to search with. Use $NAME for identifiers, $$$ for any nodes. E.g. 'function $NAME($$$) { $$$ }' to match all function declarations.",
 	}),
-	path: Type.Optional(
-		Type.String({
-			description: "File or directory to search in (default: current directory)",
-		}),
-	),
+	path: Type.Optional(Type.String({ description: "File or directory to search in (default: current directory)" })),
 	language: Type.Optional(
 		Type.String({
 			description:
-				"Language identifier, e.g. typescript, python, rust. Auto-detected from file extension if omitted.",
+				"Language identifier, e.g. typescript, python, rust. Auto-detected from file extension for single files; required for directory search.",
+		}),
+	),
+	globs: Type.Optional(
+		Type.Array(Type.String(), {
+			description: "Glob patterns to filter files, e.g. ['src/**/*.ts', '!**/*.test.ts']",
 		}),
 	),
 	limit: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum results (default: 100)" })),
@@ -39,10 +48,12 @@ export interface AstToolOptions {
 
 export interface AstToolDetails {
 	matchLimitReached?: number;
+	truncation?: TruncationResult;
+	linesTruncated?: boolean;
 }
 
 function formatAstCall(
-	args: { pattern: string; path?: string; language?: string; limit?: number } | undefined,
+	args: { pattern: string; path?: string; language?: string; globs?: string[]; limit?: number } | undefined,
 	theme: Theme,
 ): string {
 	const pattern = str(args?.pattern);
@@ -63,12 +74,7 @@ function formatAstCall(
 
 function formatAstResult(
 	result: {
-		content: Array<{
-			type: string;
-			text?: string;
-			data?: string;
-			mimeType?: string;
-		}>;
+		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
 		details?: AstToolDetails;
 	},
 	options: ToolRenderResultOptions,
@@ -89,22 +95,26 @@ function formatAstResult(
 	}
 
 	const matchLimit = result.details?.matchLimitReached;
-	if (matchLimit) {
-		text += `\n${theme.fg("warning", `[${matchLimit} results limit reached. Use limit=${matchLimit * 2} for more, or refine pattern]`)}`;
+	const truncation = result.details?.truncation;
+	const linesTruncated = result.details?.linesTruncated;
+	if (matchLimit || truncation?.truncated || linesTruncated) {
+		const warnings: string[] = [];
+		if (matchLimit) warnings.push(`${matchLimit} matches limit`);
+		if (truncation?.truncated) warnings.push(`${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`);
+		if (linesTruncated) warnings.push("some lines truncated");
+		text += `\n${theme.fg("warning", `[Truncated: ${warnings.join(", ")}]`)}`;
 	}
 	return text;
 }
 
-function formatMatch(match: PatternMatch): string {
+function formatMatch(match: PatternMatch): { line: string; wasTruncated: boolean } {
 	const filePath = match.filePath.replace(/\\/g, "/");
 	const line = match.range.start.line;
 	const text = match.text.replace(/\r?\n/g, " ").trim();
 	const keys = Object.keys(match.captures);
-	if (keys.length > 0) {
-		const kv = keys.map((k) => `${k}: ${match.captures[k]}`).join(", ");
-		return `${filePath}:${line}: ${text}  [${kv}]`;
-	}
-	return `${filePath}:${line}: ${text}`;
+	const lineText = keys.length > 0 ? `${text}  [${keys.map((k) => `${k}: ${match.captures[k]}`).join(", ")}]` : text;
+	const { text: truncated, wasTruncated } = truncateLine(lineText);
+	return { line: `${filePath}:${line}: ${truncated}`, wasTruncated };
 }
 
 export function createAstToolDefinition(
@@ -114,12 +124,12 @@ export function createAstToolDefinition(
 	return {
 		name: "ast",
 		label: "ast",
-		description: `Search code by AST pattern using ast-grep. Returns matching code blocks with file paths, line numbers, and captured variables. Supports JS/TS, Python, Rust, Go, Java, C/C++/C#, and more. Output is truncated to ${DEFAULT_LIMIT} results.`,
+		description: `Search code by AST pattern using ast-grep. Returns matching code blocks with file paths, line numbers, and captured variables. Supports JS/TS, Python, Rust, Go, Java, C/C++/C#, and more. Output is truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Long lines are truncated to ${GREP_MAX_LINE_LENGTH} chars.`,
 		promptSnippet: "Search code structure with AST patterns (ast-grep)",
 		parameters: astSchema,
 		async execute(
 			_toolCallId,
-			{ pattern, path: searchPath, language, limit }: AstToolInput,
+			{ pattern, path: searchPath, language, globs, limit }: AstToolInput,
 			signal?: AbortSignal,
 			_onUpdate?,
 			_ctx?,
@@ -128,10 +138,7 @@ export function createAstToolDefinition(
 				throw new Error("Operation aborted");
 			}
 
-			// Runtime guard: truncate to integer (Type.Integer validates schema but
-			// doesn't prevent runtime float).
 			const effectiveLimit = limit !== undefined ? Math.max(1, Math.trunc(limit)) : DEFAULT_LIMIT;
-
 			const search = new StructuralSearch();
 
 			let result: { matches: PatternMatch[]; killedDueToLimit: boolean };
@@ -149,9 +156,18 @@ export function createAstToolDefinition(
 					if (!language) {
 						throw new Error("language parameter is required for directory search. E.g. language: 'typescript'");
 					}
-					result = await search.searchMany(resolvedPath, pattern, language, signal, effectiveLimit);
+					result = await search.searchMany(resolvedPath, pattern, language, {
+						signal,
+						limit: effectiveLimit,
+						globs,
+					});
 				} else {
-					result = await search.search(resolvedPath, pattern, signal, effectiveLimit);
+					result = await search.search(resolvedPath, pattern, {
+						signal,
+						limit: effectiveLimit,
+						language,
+						globs,
+					});
 				}
 			} else {
 				if (!language) {
@@ -159,7 +175,11 @@ export function createAstToolDefinition(
 						"language parameter is required when searching the whole project. E.g. language: 'typescript'",
 					);
 				}
-				result = await search.searchMany(cwd, pattern, language, signal, effectiveLimit);
+				result = await search.searchMany(cwd, pattern, language, {
+					signal,
+					limit: effectiveLimit,
+					globs,
+				});
 			}
 
 			const { matches, killedDueToLimit } = result;
@@ -171,12 +191,37 @@ export function createAstToolDefinition(
 				};
 			}
 
-			const output = matches.map(formatMatch).join("\n");
+			// Format output with per-line truncation, then apply byte truncation.
+			let linesTruncated = false;
+			const formattedLines: string[] = [];
+			for (const m of matches) {
+				const fm = formatMatch(m);
+				if (fm.wasTruncated) linesTruncated = true;
+				formattedLines.push(fm.line);
+			}
+			const rawOutput = formattedLines.join("\n");
+
+			const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+			let output = truncation.content;
 
 			const details: AstToolDetails = {};
+			const notices: string[] = [];
 			if (killedDueToLimit) {
+				notices.push(
+					`${effectiveLimit} matches limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`,
+				);
 				details.matchLimitReached = effectiveLimit;
 			}
+			if (truncation.truncated) {
+				notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+				details.truncation = truncation;
+			}
+			if (linesTruncated) {
+				notices.push(`Some lines truncated to ${GREP_MAX_LINE_LENGTH} chars. Use read tool to see full lines`);
+				details.linesTruncated = true;
+			}
+			if (notices.length > 0) output += `\n\n[${notices.join(". ")}]`;
+
 			return {
 				content: [{ type: "text", text: output }],
 				details: Object.keys(details).length > 0 ? details : undefined,

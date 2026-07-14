@@ -17,7 +17,58 @@
 - 和 `fd`/`rg` **一模一样的模式**：自动下载、自动缓存、离线 fallback、Termux 指引。
 - 复用 `plan-lsp-client` 分支上已有的 `StructuralSearch` 封装和 `TOOLS.sg` 配置，去掉 LSP/SemanticIndex 耦合。
 - 不做 LSP、不做 semantic-index、不做 `go_to_definition` 等语义工具 — 它们属于另一个计划。
-- `ast` 工具只负责**结构化搜索** (`sg run --json -p <pattern>`) 和**代码重写** (`sg run -p <pattern> -r <replacement>`)。
+- `ast` 是一个**只读的结构化代码搜索工具**（read-only structural code search），底层为 ast-grep CLI。
+- 职责：比 grep 更准确地定位代码结构。不写文件。修改走 `ast → read → edit` 流程。
+- 不承诺完整 ast-grep 能力（rule engine、codemod、自动重构），不承诺语义分析。
+
+### 0.1 关于 rewrite 的决策
+
+**当前**：`StructuralSearch.rewrite()` 已删除。
+
+**理由**：ast 作为 core tool 的职责是比 grep 更准确地回答「哪里有这种代码结构」，随后由现有 `read` / `edit` 完成修改。边界清晰，符合 agent 可审计工作流。
+
+删除的收益：
+- 避免未验证、未测试的死代码——rewrite() 没有 tool schema、没有调用方、没有契约。
+- 避免绕过 `edit` 的差异展示、失败语义和文件修改队列。
+- 防止模型把「找到了匹配」误当成「可以安全全局替换」。
+- 避免直接落盘时的部分成功、跨文件失败、取消中断、忽略规则不一致、生成代码误改等复杂状态。
+- 减少 core tool 的参数和提示词负担。对大多数任务，`ast → read → edit` 已足够。
+
+保留的代价：
+- 大规模机械改造更慢、更贵：例如 500 个旧 API 迁移到新 API，模型需要多轮读取和编辑。
+- `edit` 基于文本 old/new，面对格式差异、同模式在多文件中重复时不如 AST rewrite 稳定。
+- Agent 失去「按结构批量变换」能力，只能把 AST 当高级定位器。
+
+**未来**：只有出现高频、大批量、语法机械迁移需求时，才做独立的 preview-first `ast_transform` tool，不塞回 `ast`。
+
+推荐的两步接口：
+
+```typescript
+// 第一步：预览，不落盘
+ast_transform({
+  pattern: "oldApi($$$ARGS)",
+  rewrite: "newApi($$$ARGS)",
+  path: ".",
+  language: "typescript",
+  globs: ["src/**/*.ts", "!**/*.test.ts"],
+  mode: "preview",
+});
+// 返回：命中文件数、匹配数、每个文件的 unified diff、截断与跳过说明
+
+// 第二步：显式应用
+ast_transform({
+  pattern: "oldApi($$$ARGS)",
+  rewrite: "newApi($$$ARGS)",
+  path: ".",
+  language: "typescript",
+  globs: ["src/**/*.ts"],
+  mode: "apply",
+  expectedMatchCount: 500,
+});
+// apply 需要：与 edit 相同的文件修改队列与 diff 输出；
+// expectedMatchCount 防止扫描结果变化后误改；
+// 默认尊重 ignore/glob；可取消；明确报告已修改/未修改文件
+```
 
 ## 1. 涉及文件
 
@@ -79,7 +130,6 @@ sg: {
 | 文件 | 用途 | 改动 |
 |------|------|------|
 | `types.ts` | `Position`, `Range`, `PatternMatch` | 直接移植，不改 |
-| `patterns.ts` | 预定义代码模式 `PATTERNS` | 直接移植，不改 |
 | `search.ts` | `StructuralSearch` 类（spawn sg + JSON 解析） | 保持内部 `ensureTool("sg")` 模式，和 find/grep 一致 |
 | `index.ts` | 工具定义 `createAstToolDefinition` / `createAstTool` + render 辅助函数 | **新建**，参照 `find.ts`/`grep.ts` 写 |
 
@@ -91,7 +141,6 @@ packages/coding-agent/src/core/tools/
     index.ts        # createAstToolDefinition, createAstTool, render helpers
     search.ts       # StructuralSearch 类（spawn sg）
     types.ts        # PatternMatch, Position, Range
-    patterns.ts     # 预定义代码模式 PATTERNS
   find.ts           # fd 工具（单文件）
   grep.ts           # rg 工具（单文件）
   bash.ts
@@ -188,7 +237,7 @@ export function createAstToolDefinition(cwd: string): ToolDefinition<typeof astS
    - 或者保持现有设计（内部调用 `ensureTool`）也行，和 `find.ts`/`grep.ts` 完全一致。
    - **推荐**：保持内部 `ensureTool` 模式，和 `find`/`grep` 一字不差。
 
-3. **`language` 参数**：`StructuralSearch._extToLang` 已有完整的扩展名→语言映射。`ast` 工具公开 `language` 参数允许用户显式指定（目录搜索时文件扩展名不一）。
+3. **`language` 参数**：单文件时 sg 根据扩展名自推断语言，无需 `-l`；目录搜索或显式覆盖时传 `-l`。不维护手写语言映射。
 
 4. **输出格式**：参照 grep 的格式：
    ```
@@ -256,7 +305,7 @@ export function createAstToolDefinition(cwd: string): ToolDefinition<typeof astS
 | 步骤 | 内容 | 预估复杂度 |
 |------|------|-----------|
 | 1 | `tools-manager.ts` 新增 `sg` 配置 + 类型扩展 | 低（照搬 plan-lsp-client） |
-| 2 | 移植 `core/tools/ast/` 目录（types, patterns, search） | 低 |
+| 2 | 移植 `core/tools/ast/` 目录（types, search） | 低 |
 | 3 | 新建 `core/tools/ast/index.ts` 工具定义 | 中（需参照 find/grep 的 execute/render 模式） |
 | 4 | 注册到 `tools/index.ts`（ToolName, allToolNames, createAllToolDefinitions） | 低 |
 | 5 | 测试 `test/tools/ast.test.ts` | 中 |
