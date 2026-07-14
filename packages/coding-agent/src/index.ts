@@ -205,8 +205,9 @@ export {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
-	createBashTool,
 	// Tool factories (for custom cwd)
+	createAstTool,
+	createBashTool,
 	createCodingTools,
 	createEditTool,
 	createFindTool,
@@ -266,12 +267,16 @@ export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Tools
 export {
+	type AstToolDetails,
+	type AstToolInput,
+	type AstToolOptions,
 	type BashOperations,
 	type BashSpawnContext,
 	type BashSpawnHook,
 	type BashToolDetails,
 	type BashToolInput,
 	type BashToolOptions,
+	createAstToolDefinition,
 	createBashToolDefinition,
 	createEditToolDefinition,
 	createFindToolDefinition,
@@ -299,6 +304,9 @@ export {
 	type LsToolDetails,
 	type LsToolInput,
 	type LsToolOptions,
+	type PatternMatch,
+	type Position,
+	type Range,
 	type ReadOperations,
 	type ReadToolDetails,
 	type ReadToolInput,

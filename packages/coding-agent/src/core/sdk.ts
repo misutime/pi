@@ -24,6 +24,7 @@ import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
 import {
 	allToolNames,
+	createAstTool,
 	createBashTool,
 	createCodingTools,
 	createEditTool,
@@ -129,6 +130,7 @@ export {
 	createGrepTool,
 	createFindTool,
 	createLsTool,
+	createAstTool,
 };
 
 // Helper Functions
