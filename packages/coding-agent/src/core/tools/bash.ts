@@ -298,8 +298,9 @@ export function createBashToolDefinition(
 	return {
 		name: "bash",
 		label: "bash",
-		description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
-		promptSnippet: "Execute bash commands (ls, grep, find, etc.)",
+		description: `Execute a shell command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. Use for git, npm, gh, scripts, build commands, diagnostics, and other CLI operations not covered by available dedicated tools.`,
+		promptSnippet: "Run shell commands for CLI and project operations",
+		promptGuidelines: ["Use bash for git, npm, gh, scripts, build commands, diagnostics, and other CLI operations."],
 		parameters: bashSchema,
 		async execute(
 			_toolCallId,

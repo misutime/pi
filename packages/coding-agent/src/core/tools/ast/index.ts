@@ -124,8 +124,8 @@ export function createAstToolDefinition(
 	return {
 		name: "ast",
 		label: "ast",
-		description: `Search code by AST pattern using ast-grep. Returns matching code blocks with file paths, line numbers, and captured variables. Supports JS/TS, Python, Rust, Go, Java, C/C++/C#, and more. Output is truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Long lines are truncated to ${GREP_MAX_LINE_LENGTH} chars.`,
-		promptSnippet: "Search code structure with AST patterns (ast-grep)",
+		description: `Search code by syntax structure — find functions, classes, calls, imports, and declarations. Use for structural code matches, not plain text search (use grep for that). Returns matching code blocks with file paths, 1-based line numbers, and named captures ($NAME, $$$MATCH). Pattern syntax follows ast-grep: $NAME for single identifiers, $$$ for any nodes. Supports JS/TS, Python, Rust, Go, Java, C/C++/C#, and more. Output is truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Long lines are truncated to ${GREP_MAX_LINE_LENGTH} chars.`,
+		promptSnippet: "Search code by syntax structure",
 		parameters: astSchema,
 		async execute(
 			_toolCallId,
