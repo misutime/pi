@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,6 +10,16 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const srcDir = resolve(repoRoot, "packages", "extensions");
+const outDir = resolve(repoRoot, "packages", "coding-agent", "extensions");
+
+// 清理旧的构建产物，避免已删除/改名的扩展残留
+if (existsSync(outDir)) {
+	for (const entry of readdirSync(outDir, { withFileTypes: true })) {
+		if (entry.isDirectory()) {
+			rmSync(join(outDir, entry.name), { recursive: true, force: true });
+		}
+	}
+}
 
 let built = 0;
 for (const name of readdirSync(srcDir, { withFileTypes: true })) {

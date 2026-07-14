@@ -27,8 +27,13 @@ await esbuild.build({
 	mainFields: ["module", "main"],
 	target: "node22",
 	outfile: join(outDir, "index.js"),
+	banner: {
+		js: 'import { createRequire as __piCreateRequire } from "node:module"; var require = __piCreateRequire(import.meta.url);',
+	},
 	external: [
 		"@earendil-works/pi-coding-agent",
+		"@earendil-works/pi-ai",
+		"@earendil-works/pi-tui",
 		"typebox",
 		"canvas",
 		"*.node",
