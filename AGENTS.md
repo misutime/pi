@@ -145,6 +145,8 @@ If the user's instructions conflict with any rule in this document, ask for expl
 
 ## Cross-Platform Compatibility
 
+Node package compatibility is the priority. Bun support is best-effort and must not block Node package work or imply third-party extension compatibility.
+
 All functional code (build scripts, test assertions, tool implementations) must work on both Windows (pwsh) and macOS/Linux (zsh). Platform-specific paths, shell syntax, and OS calls must be abstracted or guarded.
 
 ### Justfile
