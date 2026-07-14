@@ -1,0 +1,3 @@
+[submodule "vendor/pi-mcp-adapter"]
+	path = vendor/pi-mcp-adapter
+	url = https://github.com/misutime/pi-mcp-adapter.git
